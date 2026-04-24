@@ -404,7 +404,6 @@
             showQuest();
             showNav();
             startTimer();
-            enterFullscreen();
 
             // Debug: tampilkan status jawUser di console
             console.log('Final jawUser setelah load:', jawUser);
@@ -419,6 +418,7 @@
           Swal.fire('Error', 'Terjadi kesalahan: ' + err.message, 'error');
         })
         .cekLogin(t, userInput, k);
+      enterFullscreen();
     }
 
     // ==================== TAMPIL SOAL ====================
