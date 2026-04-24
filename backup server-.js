@@ -4,6 +4,17 @@ const SHEET_PERMANEN = 'Jawaban';
 const SHEET_START_TIME = 'StartTime';
 
 function doGet() {
+  // Deteksi apakah user minta admin atau siswa
+  const url = ScriptApp.getService().getUrl();
+  const parameter = arguments[0]?.parameter;
+  
+  if (parameter && parameter.page === 'admin') {
+    return HtmlService.createTemplateFromFile('Admin')
+      .evaluate()
+      .setTitle('Admin Panel CBT')
+      .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+  }
+  
   return HtmlService.createTemplateFromFile('Index')
     .evaluate()
     .setTitle('CBT MTsN 1 CIAMIS')

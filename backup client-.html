@@ -229,570 +229,574 @@
         </div>
 
         <button class="btn btn-primary w-100 py-3 fw-bold shadow" onclick="mulaiProses()">MULAI UJIAN</button>
+
+        <div class='w-100 text-center mt-3'>
+          <a href="https://script.google.com/macros/s/AKfycbznD6mc6F8jIrn_VzyMpTzlnf43rPu4E6M45qvBKX0/dev?page=admin">Masuk Admin Panel</a>
+        </div>
       </div>
-    </div>
 
-    <div id="view-exam" class="row d-none">
-      <div class="col-lg-8 mb-4">
-        <div class="q-card p-4">
-          <div class="d-flex justify-content-between border-bottom pb-3 mb-4">
-            <span id="txt-mapel" class="badge bg-secondary p-2">MAPEL</span>
-            <span id="txt-no" class="fw-bold text-primary">SOAL NOMOR 1</span>
+      <div id="view-exam" class="row d-none">
+        <div class="col-lg-8 mb-4">
+          <div class="q-card p-4">
+            <div class="d-flex justify-content-between border-bottom pb-3 mb-4">
+              <span id="txt-mapel" class="badge bg-secondary p-2">MAPEL</span>
+              <span id="txt-no" class="fw-bold text-primary">SOAL NOMOR 1</span>
+            </div>
+
+            <div id="area-soal" class="mb-5" style="min-height: 250px;"></div>
+
+            <div class="row g-2 text-center border-top pt-4">
+              <div class="col-4"><button class="btn btn-outline-dark w-100 py-2" onclick="move(-1)">KEMBALI</button>
+              </div>
+              <div class="col-4">
+                <button id="btn-ragu" class="btn btn-warning w-100 py-2 fw-bold" onclick="setRagu()">RAGU-RAGU</button>
+              </div>
+              <div class="col-4"><button class="btn btn-primary w-100 py-2 fw-bold" onclick="move(1)">LANJUT</button>
+              </div>
+            </div>
           </div>
+        </div>
 
-          <div id="area-soal" class="mb-5" style="min-height: 250px;"></div>
-
-          <div class="row g-2 text-center border-top pt-4">
-            <div class="col-4"><button class="btn btn-outline-dark w-100 py-2" onclick="move(-1)">KEMBALI</button></div>
-            <div class="col-4">
-              <button id="btn-ragu" class="btn btn-warning w-100 py-2 fw-bold" onclick="setRagu()">RAGU-RAGU</button>
-            </div>
-            <div class="col-4"><button class="btn btn-primary w-100 py-2 fw-bold" onclick="move(1)">LANJUT</button>
-            </div>
+        <div class="col-lg-4">
+          <div class="q-card p-3">
+            <h6 class="fw-bold mb-3"><i class="bi bi-grid-3x3-gap-fill me-2"></i>NOMOR SOAL</h6>
+            <div id="area-nav" class="d-flex flex-wrap justify-content-center mb-4"></div>
+            <hr>
+            <div id="info-lock" class="text-center mb-2 small text-danger fw-bold"></div>
+            <button id="btn-selesai" class="btn btn-danger w-100 fw-bold py-2 shadow-sm" disabled
+              onclick="konfirmasiSelesai()">SELESAI UJIAN</button>
+            <button id="btn-reload" class="btn-reload" onclick="reloadJawabanTersimpan()" style="display:none;">
+              <i class="bi bi-arrow-repeat"></i> Muat Ulang Jawaban
+            </button>
           </div>
         </div>
       </div>
 
-      <div class="col-lg-4">
-        <div class="q-card p-3">
-          <h6 class="fw-bold mb-3"><i class="bi bi-grid-3x3-gap-fill me-2"></i>NOMOR SOAL</h6>
-          <div id="area-nav" class="d-flex flex-wrap justify-content-center mb-4"></div>
-          <hr>
-          <div id="info-lock" class="text-center mb-2 small text-danger fw-bold"></div>
-          <button id="btn-selesai" class="btn btn-danger w-100 fw-bold py-2 shadow-sm" disabled
-            onclick="konfirmasiSelesai()">SELESAI UJIAN</button>
-          <button id="btn-reload" class="btn-reload" onclick="reloadJawabanTersimpan()" style="display:none;">
-            <i class="bi bi-arrow-repeat"></i> Muat Ulang Jawaban
-          </button>
-        </div>
-      </div>
     </div>
 
-  </div>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <script>
+      // ==================== VARIABEL GLOBAL ====================
+      let quest = [], kunci = {}, jawUser = {}, ragu = {};
+      let idx = 0, sisa = 0, statusUjian = "OFF";
+      let pelanggaran = 0;
+      let currentToken = '', currentUsername = '', currentNama = '', currentKelas = '', currentMapel = '', currentLoginVia = '';
+      let syncQueue = [], retryInterval = null, timerInterval = null, lastSavedTime = null;
+      let isSubmitting = false;
 
-  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-  <script>
-    // ==================== VARIABEL GLOBAL ====================
-    let quest = [], kunci = {}, jawUser = {}, ragu = {};
-    let idx = 0, sisa = 0, statusUjian = "OFF";
-    let pelanggaran = 0;
-    let currentToken = '', currentUsername = '', currentNama = '', currentKelas = '', currentMapel = '', currentLoginVia = '';
-    let syncQueue = [], retryInterval = null, timerInterval = null, lastSavedTime = null;
-    let isSubmitting = false;
-
-    // ==================== DETEKSI PINDAH TAB ====================
-    window.onblur = () => {
-      if (statusUjian === "AKTIF") {
-        pelanggaran++;
-        if (pelanggaran === 1) Swal.fire('Peringatan 1', 'Jangan pindah tab atau membuka aplikasi lain!', 'warning');
-        else if (pelanggaran === 2) Swal.fire('Peringatan 2', 'Sekali lagi melanggar, ujian akan otomatis dikirim!', 'error');
-        else if (pelanggaran >= 3) {
-          Swal.fire('Diskualifikasi', 'Anda melanggar 3 kali. Jawaban dikirim otomatis.', 'error').then(() => kirimJawaban());
-        }
-      }
-    };
-
-    // ==================== RELOAD JAWABAN ====================
-    function reloadJawabanTersimpan() {
-      if (!currentToken || !currentUsername || !currentMapel) {
-        Swal.fire('Info', 'Data session tidak lengkap', 'info');
-        return;
-      }
-
-      Swal.fire({ title: 'Memuat ulang jawaban...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
-
-      google.script.run
-        .withSuccessHandler(jawaban => {
-          console.log('Raw jawaban dari server:', jawaban);
-
-          if (jawaban && typeof jawaban === 'object') {
-            let count = 0;
-            // Kosongkan jawUser dulu
-            jawUser = {};
-
-            for (let soalId in jawaban) {
-              jawUser[soalId] = jawaban[soalId];
-              count++;
-              console.log(`Soal ${soalId} -> jawaban: ${jawaban[soalId]}`);
-            }
-
-            // Refresh tampilan
-            showQuest();
-            showNav();
-
-            Swal.fire('Sukses', `Berhasil memuat ${count} jawaban tersimpan`, 'success', 1500);
-          } else {
-            Swal.fire('Info', 'Tidak ada jawaban tersimpan', 'info', 1500);
+      // ==================== DETEKSI PINDAH TAB ====================
+      window.onblur = () => {
+        if (statusUjian === "AKTIF") {
+          pelanggaran++;
+          if (pelanggaran === 1) Swal.fire('Peringatan 1', 'Jangan pindah tab atau membuka aplikasi lain!', 'warning');
+          else if (pelanggaran === 2) Swal.fire('Peringatan 2', 'Sekali lagi melanggar, ujian akan otomatis dikirim!', 'error');
+          else if (pelanggaran >= 3) {
+            Swal.fire('Diskualifikasi', 'Anda melanggar 3 kali. Jawaban dikirim otomatis.', 'error').then(() => kirimJawaban());
           }
-        })
-        .withFailureHandler(err => {
-          console.error('Error reload:', err);
-          Swal.fire('Error', 'Gagal memuat jawaban: ' + err.message, 'error');
-        })
-        .ambilJawabanSementara(currentToken, currentUsername, currentMapel);
-    }
+        }
+      };
 
-    // ==================== LOGIN ====================
-    function mulaiProses() {
-      const userInput = document.getElementById('in-user').value;
-      const k = document.getElementById('in-kelas').value;
-      const t = document.getElementById('in-token').value;
+      // ==================== RELOAD JAWABAN ====================
+      function reloadJawabanTersimpan() {
+        if (!currentToken || !currentUsername || !currentMapel) {
+          Swal.fire('Info', 'Data session tidak lengkap', 'info');
+          return;
+        }
 
-      if (!userInput || !k || !t) {
-        return Swal.fire('Error', 'Lengkapi Username/Nama, Kelas, dan Token!', 'error');
+        Swal.fire({ title: 'Memuat ulang jawaban...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+
+        google.script.run
+          .withSuccessHandler(jawaban => {
+            console.log('Raw jawaban dari server:', jawaban);
+
+            if (jawaban && typeof jawaban === 'object') {
+              let count = 0;
+              // Kosongkan jawUser dulu
+              jawUser = {};
+
+              for (let soalId in jawaban) {
+                jawUser[soalId] = jawaban[soalId];
+                count++;
+                console.log(`Soal ${soalId} -> jawaban: ${jawaban[soalId]}`);
+              }
+
+              // Refresh tampilan
+              showQuest();
+              showNav();
+
+              Swal.fire('Sukses', `Berhasil memuat ${count} jawaban tersimpan`, 'success', 1500);
+            } else {
+              Swal.fire('Info', 'Tidak ada jawaban tersimpan', 'info', 1500);
+            }
+          })
+          .withFailureHandler(err => {
+            console.error('Error reload:', err);
+            Swal.fire('Error', 'Gagal memuat jawaban: ' + err.message, 'error');
+          })
+          .ambilJawabanSementara(currentToken, currentUsername, currentMapel);
       }
 
-      currentToken = t;
-      currentKelas = k;
+      // ==================== LOGIN ====================
+      function mulaiProses() {
+        const userInput = document.getElementById('in-user').value;
+        const k = document.getElementById('in-kelas').value;
+        const t = document.getElementById('in-token').value;
 
-      Swal.fire({ title: 'Menyiapkan Soal...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+        if (!userInput || !k || !t) {
+          return Swal.fire('Error', 'Lengkapi Username/Nama, Kelas, dan Token!', 'error');
+        }
 
-      google.script.run
-        .withSuccessHandler(res => {
-          console.log('Response dari server:', res);
+        currentToken = t;
+        currentKelas = k;
+
+        Swal.fire({ title: 'Menyiapkan Soal...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+
+        google.script.run
+          .withSuccessHandler(res => {
+            console.log('Response dari server:', res);
 
 
 
-          if (res.status === "success") {
-            quest = res.soal;
-            kunci = res.kunci;
-            currentMapel = res.mapel;
-            currentUsername = res.username;
-            currentNama = res.namaSiswa;
-            currentLoginVia = res.loginVia;
+            if (res.status === "success") {
+              quest = res.soal;
+              kunci = res.kunci;
+              currentMapel = res.mapel;
+              currentUsername = res.username;
+              currentNama = res.namaSiswa;
+              currentLoginVia = res.loginVia;
 
-            // ===== PERBAIKAN UTAMA: Muat jawaban tersimpan =====
-            jawUser = {};
-            if (res.jawabanTersimpan && typeof res.jawabanTersimpan === 'object') {
-              for (let soalId in res.jawabanTersimpan) {
-                jawUser[soalId] = res.jawabanTersimpan[soalId];
+              // ===== PERBAIKAN UTAMA: Muat jawaban tersimpan =====
+              jawUser = {};
+              if (res.jawabanTersimpan && typeof res.jawabanTersimpan === 'object') {
+                for (let soalId in res.jawabanTersimpan) {
+                  jawUser[soalId] = res.jawabanTersimpan[soalId];
+                }
+                console.log('Jawaban dimuat:', jawUser);
+              } else {
+                console.log('Tidak ada jawaban tersimpan, res.jawabanTersimpan =', res.jawabanTersimpan);
               }
-              console.log('Jawaban dimuat:', jawUser);
-            } else {
-              console.log('Tidak ada jawaban tersimpan, res.jawabanTersimpan =', res.jawabanTersimpan);
-            }
 
-            sisa = res.sisaWaktuServer;
+              sisa = res.sisaWaktuServer;
 
-            if (sisa <= 0) {
-              Swal.fire('Waktu Habis', 'Anda tidak dapat mengikuti ujian karena waktu telah habis.', 'error')
-                .then(() => location.reload());
-              return;
-            }
+              if (sisa <= 0) {
+                Swal.fire('Waktu Habis', 'Anda tidak dapat mengikuti ujian karena waktu telah habis.', 'error')
+                  .then(() => location.reload());
+                return;
+              }
 
-            // Tampilkan info login dengan jumlah jawaban
-            Swal.fire({
-              title: 'Login Berhasil!',
-              html: `Login via: <strong>${res.loginVia}</strong><br>
+              // Tampilkan info login dengan jumlah jawaban
+              Swal.fire({
+                title: 'Login Berhasil!',
+                html: `Login via: <strong>${res.loginVia}</strong><br>
                  Nama: ${res.namaSiswa}<br>
                  Mapel: ${res.mapel}<br>
                  <span style="color:green">Jawaban tersimpan: ${Object.keys(jawUser).length} soal</span>`,
-              icon: 'success',
-              timer: 2500,
-              showConfirmButton: false
-            });
+                icon: 'success',
+                timer: 2500,
+                showConfirmButton: false
+              });
 
-            statusUjian = "AKTIF";
-            document.getElementById('view-login').classList.add('d-none');
-            document.getElementById('view-exam').classList.remove('d-none');
-            document.getElementById('wrapper-timer').classList.remove('d-none');
-            document.getElementById('txt-mapel').innerText = res.mapel;
-            document.getElementById('btn-reload').style.display = 'block';
+              statusUjian = "AKTIF";
+              document.getElementById('view-login').classList.add('d-none');
+              document.getElementById('view-exam').classList.remove('d-none');
+              document.getElementById('wrapper-timer').classList.remove('d-none');
+              document.getElementById('txt-mapel').innerText = res.mapel;
+              document.getElementById('btn-reload').style.display = 'block';
 
-            // Tampilkan soal pertama
-            idx = 0;
-            showQuest();
-            showNav();
-            startTimer();
+              // Tampilkan soal pertama
+              idx = 0;
+              showQuest();
+              showNav();
+              startTimer();
 
-            // Debug: tampilkan status jawUser di console
-            console.log('Final jawUser setelah load:', jawUser);
-            console.log('Total jawaban:', Object.keys(jawUser).length);
+              // Debug: tampilkan status jawUser di console
+              console.log('Final jawUser setelah load:', jawUser);
+              console.log('Total jawaban:', Object.keys(jawUser).length);
 
-          } else {
-            Swal.fire('Gagal', res.pesan, 'error');
-          }
-        })
-        .withFailureHandler(err => {
-          console.error('Error cekLogin:', err);
-          Swal.fire('Error', 'Terjadi kesalahan: ' + err.message, 'error');
-        })
-        .cekLogin(t, userInput, k);
-      enterFullscreen();
-    }
-
-    // ==================== TAMPIL SOAL ====================
-    function showQuest() {
-      const s = quest[idx];
-      if (!s) return;
-
-      document.getElementById('txt-no').innerHTML = `SOAL NOMOR ${idx + 1}`;
-
-      // Format pertanyaan
-      const lines = s.pertanyaan.split(/\r?\n/);
-      let pertanyaanHtml = '';
-      lines.forEach(line => {
-        line = line.trim();
-        if (line === '') return;
-        const hasArabic = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/.test(line);
-        const dir = hasArabic ? 'rtl' : 'ltr';
-        const className = hasArabic ? 'arabic-line' : 'latin-line';
-        pertanyaanHtml += `<div class="${className}" dir="${dir}">${formatMarkdownInline(line)}</div>`;
-      });
-
-      let html = `<div class="fs-5 mb-4 fw-medium">${pertanyaanHtml}</div>`;
-
-      if (s.gambarPertanyaan) {
-        html += `<div class="text-center mb-3"><img src="${s.gambarPertanyaan}" class="gambar-pertanyaan" onerror="this.style.display='none'" alt="Gambar soal"></div>`;
+            } else {
+              Swal.fire('Gagal', res.pesan, 'error');
+            }
+          })
+          .withFailureHandler(err => {
+            console.error('Error cekLogin:', err);
+            Swal.fire('Error', 'Terjadi kesalahan: ' + err.message, 'error');
+          })
+          .cekLogin(t, userInput, k);
+        enterFullscreen();
       }
 
-      if (s.opsi && s.opsi.length > 0) {
-        s.opsi.forEach((opsi, optIndex) => {
-          const optKey = `${s.id}_${optIndex}`;
-          // PERBAIKAN: Pastikan perbandingan menggunakan string
-          const jawabanTersimpan = jawUser[s.id];
-          const isSelected = String(jawabanTersimpan) === String(optKey);
+      // ==================== TAMPIL SOAL ====================
+      function showQuest() {
+        const s = quest[idx];
+        if (!s) return;
 
-          const optionLetter = String.fromCharCode(65 + optIndex);
-          const hasArabicOpt = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/.test(opsi.text);
-          const optDir = hasArabicOpt ? 'rtl' : 'ltr';
-          const optClass = hasArabicOpt ? 'rtl-opt' : '';
+        document.getElementById('txt-no').innerHTML = `SOAL NOMOR ${idx + 1}`;
 
-          html += `<div class="opt-box ${isSelected ? 'opt-selected' : ''} ${optClass}" onclick="pilih('${s.id}', '${optKey}')" dir="${optDir}">
+        // Format pertanyaan
+        const lines = s.pertanyaan.split(/\r?\n/);
+        let pertanyaanHtml = '';
+        lines.forEach(line => {
+          line = line.trim();
+          if (line === '') return;
+          const hasArabic = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/.test(line);
+          const dir = hasArabic ? 'rtl' : 'ltr';
+          const className = hasArabic ? 'arabic-line' : 'latin-line';
+          pertanyaanHtml += `<div class="${className}" dir="${dir}">${formatMarkdownInline(line)}</div>`;
+        });
+
+        let html = `<div class="fs-5 mb-4 fw-medium">${pertanyaanHtml}</div>`;
+
+        if (s.gambarPertanyaan) {
+          html += `<div class="text-center mb-3"><img src="${s.gambarPertanyaan}" class="gambar-pertanyaan" onerror="this.style.display='none'" alt="Gambar soal"></div>`;
+        }
+
+        if (s.opsi && s.opsi.length > 0) {
+          s.opsi.forEach((opsi, optIndex) => {
+            const optKey = `${s.id}_${optIndex}`;
+            // PERBAIKAN: Pastikan perbandingan menggunakan string
+            const jawabanTersimpan = jawUser[s.id];
+            const isSelected = String(jawabanTersimpan) === String(optKey);
+
+            const optionLetter = String.fromCharCode(65 + optIndex);
+            const hasArabicOpt = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/.test(opsi.text);
+            const optDir = hasArabicOpt ? 'rtl' : 'ltr';
+            const optClass = hasArabicOpt ? 'rtl-opt' : '';
+
+            html += `<div class="opt-box ${isSelected ? 'opt-selected' : ''} ${optClass}" onclick="pilih('${s.id}', '${optKey}')" dir="${optDir}">
         <div class="opsi-badge">${optionLetter}.</div>`;
 
-          if (opsi.imageUrl) {
-            html += `<img src="${opsi.imageUrl}" class="gambar-opsi" onerror="this.style.display='none'" alt="Gambar opsi">`;
-          }
+            if (opsi.imageUrl) {
+              html += `<img src="${opsi.imageUrl}" class="gambar-opsi" onerror="this.style.display='none'" alt="Gambar opsi">`;
+            }
 
-          html += `<div class="teks-opsi">${formatMarkdownInline(opsi.text || `Pilihan ${optionLetter}`)}</div>`;
+            html += `<div class="teks-opsi">${formatMarkdownInline(opsi.text || `Pilihan ${optionLetter}`)}</div>`;
 
-          if (isSelected) {
-            html += `<i class="bi bi-check-circle-fill text-primary fs-5"></i>`;
-          }
+            if (isSelected) {
+              html += `<i class="bi bi-check-circle-fill text-primary fs-5"></i>`;
+            }
 
-          html += `</div>`;
-        });
-      } else {
-        html += '<p class="text-muted">Tidak ada opsi jawaban</p>';
-      }
-
-      document.getElementById('area-soal').innerHTML = html;
-
-      // Debug: tampilkan status jawaban untuk soal saat ini
-      console.log(`Soal ${idx + 1} (${s.id}): jawaban tersimpan = ${jawUser[s.id] || 'belum dijawab'}`);
-    }
-
-    function formatMarkdownInline(text) {
-      if (!text) return '';
-      let html = escapeHtml(text);
-      html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/__(.*?)__/g, '<strong>$1</strong>');
-      html = html.replace(/\*(.*?)\*/g, '<em>$1</em>').replace(/_(.*?)_/g, '<em>$1</em>');
-      html = html.replace(/==(.*?)==/g, '<mark class="highlight">$1</mark>');
-      html = html.replace(/~~(.*?)~~/g, '<del>$1</del>');
-      html = html.replace(/\+\+(.*?)\+\+/g, '<u>$1</u>');
-      html = html.replace(/`(.*?)`/g, '<code>$1</code>');
-      return html;
-    }
-
-    // ==================== PILIH JAWABAN ====================
-    function pilih(soalId, optKey) {
-      jawUser[soalId] = optKey;
-      delete ragu[soalId];
-      showQuest();
-      showNav();
-      simpanJawabanKeServer(soalId, optKey);
-    }
-
-    function simpanJawabanKeServer(soalId, jawaban) {
-      if (!currentToken || !currentUsername) return;
-
-      google.script.run
-        .withFailureHandler(err => {
-          console.error('Gagal simpan:', err);
-          syncQueue.push({ soalId, jawaban });
-          scheduleRetry();
-        })
-        .simpanJawabanSementara(currentToken, currentUsername, currentNama, currentKelas, currentMapel, soalId, jawaban);
-    }
-
-    function scheduleRetry() {
-      if (retryInterval) return;
-
-      retryInterval = setInterval(() => {
-        if (syncQueue.length === 0) {
-          clearInterval(retryInterval);
-          retryInterval = null;
-          return;
+            html += `</div>`;
+          });
+        } else {
+          html += '<p class="text-muted">Tidak ada opsi jawaban</p>';
         }
 
-        const item = syncQueue.shift();
-        google.script.run.simpanJawabanSementara(
-          currentToken, currentUsername, currentNama, currentKelas, currentMapel, item.soalId, item.jawaban
-        );
-      }, 5000);
-    }
+        document.getElementById('area-soal').innerHTML = html;
 
-    // ==================== RAGU-RAGU ====================
-    function setRagu() {
-      const currentSoal = quest[idx];
-      if (!currentSoal) return;
-
-      const id = currentSoal.id;
-      if (!jawUser[id]) {
-        return Swal.fire('Info', 'Pilih jawaban dulu sebelum memberi tanda ragu-ragu', 'info');
+        // Debug: tampilkan status jawaban untuk soal saat ini
+        console.log(`Soal ${idx + 1} (${s.id}): jawaban tersimpan = ${jawUser[s.id] || 'belum dijawab'}`);
       }
 
-      ragu[id] = !ragu[id];
-      showNav();
-      Swal.fire('Info', `Soal ${idx + 1} ${ragu[id] ? 'ditandai ragu-ragu' : 'tidak ragu lagi'}`, 'info', 1000);
-    }
+      function formatMarkdownInline(text) {
+        if (!text) return '';
+        let html = escapeHtml(text);
+        html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/__(.*?)__/g, '<strong>$1</strong>');
+        html = html.replace(/\*(.*?)\*/g, '<em>$1</em>').replace(/_(.*?)_/g, '<em>$1</em>');
+        html = html.replace(/==(.*?)==/g, '<mark class="highlight">$1</mark>');
+        html = html.replace(/~~(.*?)~~/g, '<del>$1</del>');
+        html = html.replace(/\+\+(.*?)\+\+/g, '<u>$1</u>');
+        html = html.replace(/`(.*?)`/g, '<code>$1</code>');
+        return html;
+      }
 
-    // ==================== NAVIGASI SOAL ====================
-    function showNav() {
-      let h = '';
-
-      quest.forEach((s, i) => {
-        let cls = 'btn-outline-secondary';
-        if (ragu[s.id]) cls = 'status-ragu';
-        else if (jawUser[s.id]) cls = 'status-yakin';
-        let act = i === idx ? 'active-now' : '';
-        h += `<button class="btn btn-nomor ${cls} ${act}" onclick="idx=${i};showQuest();showNav()">${i + 1}</button>`;
-      });
-
-      document.getElementById('area-nav').innerHTML = h;
-      const terjawab = Object.keys(jawUser).length;
-      document.getElementById('info-lock').innerHTML = `<i class="bi bi-check-circle"></i> Terjawab: ${terjawab}/${quest.length}`;
-    }
-
-    function move(n) {
-      if (idx + n >= 0 && idx + n < quest.length) {
-        idx += n;
+      // ==================== PILIH JAWABAN ====================
+      function pilih(soalId, optKey) {
+        jawUser[soalId] = optKey;
+        delete ragu[soalId];
         showQuest();
         showNav();
-        simpanSisaWaktuKeServer(sisa);
-      }
-    }
-
-    // ==================== TIMER ====================
-    function startTimer() {
-      if (timerInterval) clearInterval(timerInterval);
-      if (sisa <= 0) {
-        kirimJawaban();
-        return;
+        simpanJawabanKeServer(soalId, optKey);
       }
 
-      const display = document.getElementById('timer-display');
-      const infoLock = document.getElementById('info-lock');
-      const btnSelesai = document.getElementById('btn-selesai');
+      function simpanJawabanKeServer(soalId, jawaban) {
+        if (!currentToken || !currentUsername) return;
 
-      timerInterval = setInterval(() => {
-        if (statusUjian !== "AKTIF") {
-          clearInterval(timerInterval);
-          return;
+        google.script.run
+          .withFailureHandler(err => {
+            console.error('Gagal simpan:', err);
+            syncQueue.push({ soalId, jawaban });
+            scheduleRetry();
+          })
+          .simpanJawabanSementara(currentToken, currentUsername, currentNama, currentKelas, currentMapel, soalId, jawaban);
+      }
+
+      function scheduleRetry() {
+        if (retryInterval) return;
+
+        retryInterval = setInterval(() => {
+          if (syncQueue.length === 0) {
+            clearInterval(retryInterval);
+            retryInterval = null;
+            return;
+          }
+
+          const item = syncQueue.shift();
+          google.script.run.simpanJawabanSementara(
+            currentToken, currentUsername, currentNama, currentKelas, currentMapel, item.soalId, item.jawaban
+          );
+        }, 5000);
+      }
+
+      // ==================== RAGU-RAGU ====================
+      function setRagu() {
+        const currentSoal = quest[idx];
+        if (!currentSoal) return;
+
+        const id = currentSoal.id;
+        if (!jawUser[id]) {
+          return Swal.fire('Info', 'Pilih jawaban dulu sebelum memberi tanda ragu-ragu', 'info');
         }
 
+        ragu[id] = !ragu[id];
+        showNav();
+        Swal.fire('Info', `Soal ${idx + 1} ${ragu[id] ? 'ditandai ragu-ragu' : 'tidak ragu lagi'}`, 'info', 1000);
+      }
+
+      // ==================== NAVIGASI SOAL ====================
+      function showNav() {
+        let h = '';
+
+        quest.forEach((s, i) => {
+          let cls = 'btn-outline-secondary';
+          if (ragu[s.id]) cls = 'status-ragu';
+          else if (jawUser[s.id]) cls = 'status-yakin';
+          let act = i === idx ? 'active-now' : '';
+          h += `<button class="btn btn-nomor ${cls} ${act}" onclick="idx=${i};showQuest();showNav()">${i + 1}</button>`;
+        });
+
+        document.getElementById('area-nav').innerHTML = h;
+        const terjawab = Object.keys(jawUser).length;
+        document.getElementById('info-lock').innerHTML = `<i class="bi bi-check-circle"></i> Terjawab: ${terjawab}/${quest.length}`;
+      }
+
+      function move(n) {
+        if (idx + n >= 0 && idx + n < quest.length) {
+          idx += n;
+          showQuest();
+          showNav();
+          simpanSisaWaktuKeServer(sisa);
+        }
+      }
+
+      // ==================== TIMER ====================
+      function startTimer() {
+        if (timerInterval) clearInterval(timerInterval);
         if (sisa <= 0) {
-          clearInterval(timerInterval);
           kirimJawaban();
           return;
         }
 
-        sisa--;
-        let h = Math.floor(sisa / 3600);
-        let m = Math.floor((sisa % 3600) / 60);
-        let s = sisa % 60;
-        display.innerText = `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+        const display = document.getElementById('timer-display');
+        const infoLock = document.getElementById('info-lock');
+        const btnSelesai = document.getElementById('btn-selesai');
 
-        if (sisa > 600) {
-          let sisaKunci = sisa - 600;
-          let mk = Math.floor(sisaKunci / 60);
-          let sk = sisaKunci % 60;
-          infoLock.innerHTML = `<i class="bi bi-lock-fill"></i> Selesai aktif dalam: ${mk}:${sk.toString().padStart(2, '0')}`;
-          infoLock.classList.add('text-danger');
-          infoLock.classList.remove('text-success');
-          btnSelesai.disabled = true;
-        } else {
-          infoLock.innerHTML = `<i class="bi bi-unlock-fill"></i> Tombol Selesai Terbuka`;
-          infoLock.classList.remove('text-danger');
-          infoLock.classList.add('text-success');
-          btnSelesai.disabled = false;
-        }
+        timerInterval = setInterval(() => {
+          if (statusUjian !== "AKTIF") {
+            clearInterval(timerInterval);
+            return;
+          }
 
-        const now = Date.now();
-        if (!lastSavedTime || (now - lastSavedTime) >= 10000) {
-          lastSavedTime = now;
-          simpanSisaWaktuKeServer(sisa);
-        }
-      }, 1000);
-    }
+          if (sisa <= 0) {
+            clearInterval(timerInterval);
+            kirimJawaban();
+            return;
+          }
 
-    function simpanSisaWaktuKeServer(sisaWaktu) {
-      if (!currentToken || !currentUsername) return;
+          sisa--;
+          let h = Math.floor(sisa / 3600);
+          let m = Math.floor((sisa % 3600) / 60);
+          let s = sisa % 60;
+          display.innerText = `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 
-      google.script.run
-        .withFailureHandler(err => console.error('Gagal simpan sisa waktu:', err))
-        .simpanSisaWaktu(currentToken, currentUsername, currentKelas, currentMapel, sisaWaktu);
-    }
+          if (sisa > 600) {
+            let sisaKunci = sisa - 600;
+            let mk = Math.floor(sisaKunci / 60);
+            let sk = sisaKunci % 60;
+            infoLock.innerHTML = `<i class="bi bi-lock-fill"></i> Selesai aktif dalam: ${mk}:${sk.toString().padStart(2, '0')}`;
+            infoLock.classList.add('text-danger');
+            infoLock.classList.remove('text-success');
+            btnSelesai.disabled = true;
+          } else {
+            infoLock.innerHTML = `<i class="bi bi-unlock-fill"></i> Tombol Selesai Terbuka`;
+            infoLock.classList.remove('text-danger');
+            infoLock.classList.add('text-success');
+            btnSelesai.disabled = false;
+          }
 
-    // ==================== SELESAI UJIAN ====================
-    function konfirmasiSelesai() {
-      if (isSubmitting) return;
-
-      const raguCount = Object.keys(ragu).filter(id => ragu[id] === true).length;
-      if (raguCount > 0) {
-        return Swal.fire('Peringatan', `Masih ada ${raguCount} soal yang ditandai RAGU-RAGU (kuning)!`, 'warning');
+          const now = Date.now();
+          if (!lastSavedTime || (now - lastSavedTime) >= 10000) {
+            lastSavedTime = now;
+            simpanSisaWaktuKeServer(sisa);
+          }
+        }, 1000);
       }
 
-      const belumTerjawab = quest.filter(s => !jawUser[s.id]).length;
-      if (belumTerjawab > 0) {
-        return Swal.fire('Peringatan', `Masih ada ${belumTerjawab} soal yang belum dijawab!`, 'warning');
+      function simpanSisaWaktuKeServer(sisaWaktu) {
+        if (!currentToken || !currentUsername) return;
+
+        google.script.run
+          .withFailureHandler(err => console.error('Gagal simpan sisa waktu:', err))
+          .simpanSisaWaktu(currentToken, currentUsername, currentKelas, currentMapel, sisaWaktu);
       }
 
-      Swal.fire({
-        title: 'Akhiri Ujian?',
-        text: "Jawaban yang sudah dikirim tidak bisa diubah.",
-        icon: 'question',
-        showCancelButton: true,
-        confirmButtonText: 'Ya, Kirim!',
-        cancelButtonText: 'Batal'
-      }).then(res => {
-        if (res.isConfirmed) kirimJawaban();
-      });
-    }
+      // ==================== SELESAI UJIAN ====================
+      function konfirmasiSelesai() {
+        if (isSubmitting) return;
 
-    function kirimJawaban() {
-      if (statusUjian !== "AKTIF" || isSubmitting) return;
+        const raguCount = Object.keys(ragu).filter(id => ragu[id] === true).length;
+        if (raguCount > 0) {
+          return Swal.fire('Peringatan', `Masih ada ${raguCount} soal yang ditandai RAGU-RAGU (kuning)!`, 'warning');
+        }
 
-      isSubmitting = true;
-      statusUjian = "SELESAI";
+        const belumTerjawab = quest.filter(s => !jawUser[s.id]).length;
+        if (belumTerjawab > 0) {
+          return Swal.fire('Peringatan', `Masih ada ${belumTerjawab} soal yang belum dijawab!`, 'warning');
+        }
 
-      if (timerInterval) clearInterval(timerInterval);
-      if (retryInterval) clearInterval(retryInterval);
+        Swal.fire({
+          title: 'Akhiri Ujian?',
+          text: "Jawaban yang sudah dikirim tidak bisa diubah.",
+          icon: 'question',
+          showCancelButton: true,
+          confirmButtonText: 'Ya, Kirim!',
+          cancelButtonText: 'Batal'
+        }).then(res => {
+          if (res.isConfirmed) kirimJawaban();
+        });
+      }
 
-      Swal.fire({ title: 'Mengirim Jawaban...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+      function kirimJawaban() {
+        if (statusUjian !== "AKTIF" || isSubmitting) return;
 
-      const jawabanTeks = {};
-      for (let soalId in jawUser) {
-        const optKey = jawUser[soalId];
-        const soal = quest.find(q => q.id === soalId);
-        if (soal && optKey) {
-          const parts = optKey.split('_');
-          const optIndex = parseInt(parts[1]);
-          if (soal.opsi && soal.opsi[optIndex]) {
-            jawabanTeks[soalId] = soal.opsi[optIndex].text;
+        isSubmitting = true;
+        statusUjian = "SELESAI";
+
+        if (timerInterval) clearInterval(timerInterval);
+        if (retryInterval) clearInterval(retryInterval);
+
+        Swal.fire({ title: 'Mengirim Jawaban...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+
+        const jawabanTeks = {};
+        for (let soalId in jawUser) {
+          const optKey = jawUser[soalId];
+          const soal = quest.find(q => q.id === soalId);
+          if (soal && optKey) {
+            const parts = optKey.split('_');
+            const optIndex = parseInt(parts[1]);
+            if (soal.opsi && soal.opsi[optIndex]) {
+              jawabanTeks[soalId] = soal.opsi[optIndex].text;
+            }
           }
         }
+
+        const payload = {
+          token: currentToken,
+          nama: currentNama,
+          kelas: currentKelas,
+          mapel: currentMapel,
+          jawaban: jawabanTeks,
+          kunci: kunci,
+          pelanggaran: pelanggaran,
+          username: currentUsername,
+          loginVia: currentLoginVia
+        };
+
+        google.script.run
+          .withSuccessHandler(skor => {
+            Swal.fire('Berhasil!', `Ujian Selesai. Skor Anda: ${skor}`, 'success').then(() => {
+              resetAll();
+            });
+          })
+          .withFailureHandler(err => {
+            console.error(err);
+            Swal.fire('Error', 'Gagal menyimpan jawaban: ' + err.message, 'error').then(() => {
+              resetAll();
+            });
+          })
+          .simpanKeDatabaseFinal(payload);
       }
 
-      const payload = {
-        token: currentToken,
-        nama: currentNama,
-        kelas: currentKelas,
-        mapel: currentMapel,
-        jawaban: jawabanTeks,
-        kunci: kunci,
-        pelanggaran: pelanggaran,
-        username: currentUsername,
-        loginVia: currentLoginVia
-      };
+      function resetAll() {
+        quest = [];
+        kunci = {};
+        jawUser = {};
+        ragu = {};
+        idx = 0;
+        sisa = 0;
+        statusUjian = "OFF";
+        pelanggaran = 0;
+        currentToken = '';
+        currentUsername = '';
+        currentNama = '';
+        currentKelas = '';
+        currentMapel = '';
+        currentLoginVia = '';
+        syncQueue = [];
 
-      google.script.run
-        .withSuccessHandler(skor => {
-          Swal.fire('Berhasil!', `Ujian Selesai. Skor Anda: ${skor}`, 'success').then(() => {
-            resetAll();
-          });
-        })
-        .withFailureHandler(err => {
-          console.error(err);
-          Swal.fire('Error', 'Gagal menyimpan jawaban: ' + err.message, 'error').then(() => {
-            resetAll();
-          });
-        })
-        .simpanKeDatabaseFinal(payload);
-    }
+        if (retryInterval) clearInterval(retryInterval);
+        retryInterval = null;
+        lastSavedTime = null;
+        isSubmitting = false;
 
-    function resetAll() {
-      quest = [];
-      kunci = {};
-      jawUser = {};
-      ragu = {};
-      idx = 0;
-      sisa = 0;
-      statusUjian = "OFF";
-      pelanggaran = 0;
-      currentToken = '';
-      currentUsername = '';
-      currentNama = '';
-      currentKelas = '';
-      currentMapel = '';
-      currentLoginVia = '';
-      syncQueue = [];
+        document.getElementById('view-exam').classList.add('d-none');
+        document.getElementById('wrapper-timer').classList.add('d-none');
+        document.getElementById('btn-reload').style.display = 'none';
 
-      if (retryInterval) clearInterval(retryInterval);
-      retryInterval = null;
-      lastSavedTime = null;
-      isSubmitting = false;
+        const loginDiv = document.getElementById('view-login');
+        loginDiv.classList.remove('d-none');
+        document.getElementById('in-user').value = '';
+        document.getElementById('in-kelas').selectedIndex = 0;
+        document.getElementById('in-token').value = '';
 
-      document.getElementById('view-exam').classList.add('d-none');
-      document.getElementById('wrapper-timer').classList.add('d-none');
-      document.getElementById('btn-reload').style.display = 'none';
-
-      const loginDiv = document.getElementById('view-login');
-      loginDiv.classList.remove('d-none');
-      document.getElementById('in-user').value = '';
-      document.getElementById('in-kelas').selectedIndex = 0;
-      document.getElementById('in-token').value = '';
-
-      exitFullscreen();
-    }
-
-    function escapeHtml(text) {
-      if (!text) return '';
-      const div = document.createElement('div');
-      div.textContent = text;
-      return div.innerHTML;
-    }
-
-    // ==================== FULLSCREEN ====================
-    let fullscreenBypass = false;
-
-    function enterFullscreen() {
-      const docEl = document.documentElement;
-      const requestMethod = docEl.requestFullscreen || docEl.webkitRequestFullscreen || docEl.msRequestFullscreen;
-      if (requestMethod) {
-        requestMethod.call(docEl).catch(err => console.warn('Gagal fullscreen:', err));
+        exitFullscreen();
       }
-    }
 
-    function exitFullscreen() {
-      const exitMethod = document.exitFullscreen || document.webkitExitFullscreen || document.msExitFullscreen;
-      if (exitMethod) {
-        exitMethod.call(document);
+      function escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
       }
-    }
 
-    function onFullscreenChange() {
-      const isFullscreen = !!(document.fullscreenElement || document.webkitFullscreenElement);
-      if (statusUjian === "AKTIF" && !isFullscreen && !fullscreenBypass) {
-        Swal.fire('Peringatan', 'Ujian harus dalam mode layar penuh!', 'warning').then(() => enterFullscreen());
-      }
-    }
+      // ==================== FULLSCREEN ====================
+      let fullscreenBypass = false;
 
-    document.addEventListener('fullscreenchange', onFullscreenChange);
-    document.addEventListener('webkitfullscreenchange', onFullscreenChange);
-
-    window.addEventListener('keydown', function (e) {
-      if (e.ctrlKey && e.code === 'Space') {
-        e.preventDefault();
-        if (statusUjian === "AKTIF") {
-          fullscreenBypass = true;
-          exitFullscreen();
-          Swal.fire('Admin Bypass', 'Anda keluar dari mode layar penuh. Ujian tetap berjalan.', 'info');
+      function enterFullscreen() {
+        const docEl = document.documentElement;
+        const requestMethod = docEl.requestFullscreen || docEl.webkitRequestFullscreen || docEl.msRequestFullscreen;
+        if (requestMethod) {
+          requestMethod.call(docEl).catch(err => console.warn('Gagal fullscreen:', err));
         }
       }
-    });
-  </script>
+
+      function exitFullscreen() {
+        const exitMethod = document.exitFullscreen || document.webkitExitFullscreen || document.msExitFullscreen;
+        if (exitMethod) {
+          exitMethod.call(document);
+        }
+      }
+
+      function onFullscreenChange() {
+        const isFullscreen = !!(document.fullscreenElement || document.webkitFullscreenElement);
+        if (statusUjian === "AKTIF" && !isFullscreen && !fullscreenBypass) {
+          Swal.fire('Peringatan', 'Ujian harus dalam mode layar penuh!', 'warning').then(() => enterFullscreen());
+        }
+      }
+
+      document.addEventListener('fullscreenchange', onFullscreenChange);
+      document.addEventListener('webkitfullscreenchange', onFullscreenChange);
+
+      window.addEventListener('keydown', function (e) {
+        if (e.ctrlKey && e.code === 'Space') {
+          e.preventDefault();
+          if (statusUjian === "AKTIF") {
+            fullscreenBypass = true;
+            exitFullscreen();
+            Swal.fire('Admin Bypass', 'Anda keluar dari mode layar penuh. Ujian tetap berjalan.', 'info');
+          }
+        }
+      });
+    </script>
 </body>
 
 </html>
