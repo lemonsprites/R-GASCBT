@@ -285,13 +285,15 @@
 
   <div class="container">
 
+    <!-- Bagian form login yang berubah -->
     <div id="view-login" class="login-container mx-auto">
       <div class="card card-login p-4">
         <h4 class="text-center fw-bold mb-4 text-primary">LOGIN PESERTA</h4>
 
         <div class="mb-3">
-          <label class="form-label small fw-bold text-muted">NAMA LENGKAP</label>
-          <input type="text" id="in-nama" class="form-control form-control-lg fs-6" placeholder="Nama Peserta">
+          <label class="form-label small fw-bold text-muted">USERNAME ATAU NAMA</label>
+          <input type="text" id="in-user" class="form-control form-control-lg fs-6"
+            placeholder="Masukkan Username atau Nama Lengkap">
         </div>
 
         <div class="mb-3">
@@ -314,11 +316,6 @@
         </div>
 
         <button class="btn btn-primary w-100 py-3 fw-bold shadow" onclick="mulaiProses()">MULAI UJIAN</button>
-
-        <div class="text-center mt-3">
-          <button class="btn btn-link btn-sm text-decoration-none text-muted" onclick="loginAdmin()">Panel
-            Admin</button>
-        </div>
       </div>
     </div>
 
@@ -381,11 +378,16 @@
     };
 
     function mulaiProses() {
-      const n = document.getElementById('in-nama').value;
+      const userInput = document.getElementById('in-user').value;
       const k = document.getElementById('in-kelas').value;
       const t = document.getElementById('in-token').value;
-      if (!n || !k || !t) return Swal.fire('Error', 'Lengkapi Nama, Kelas, dan Token!', 'error');
-      currentToken = t; currentNama = n; currentKelas = k;
+
+      if (!userInput || !k || !t) return Swal.fire('Error', 'Lengkapi Username/Nama, Kelas, dan Token!', 'error');
+
+      currentToken = t;
+      currentInputUser = userInput;
+      currentKelas = k;
+
       Swal.fire({ title: 'Menyiapkan Soal...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
 
       google.script.run.withSuccessHandler(res => {
@@ -393,30 +395,40 @@
           quest = res.soal;
           kunci = res.kunci;
           currentMapel = res.mapel;
-          info = { nama: n, kelas: k, mapel: res.mapel, token: t };
+          currentUsername = res.username;
+          currentNama = res.namaSiswa;
+          currentLoginVia = res.loginVia;
 
-          google.script.run.withSuccessHandler(savedJawaban => {
-            jawUser = savedJawaban || {};
-            sisa = res.sisaWaktuServer;
-            if (sisa <= 0) {
-              Swal.fire('Waktu Habis', 'Anda tidak dapat mengikuti ujian karena waktu telah habis.', 'error').then(() => location.reload());
-              return;
-            }
-            statusUjian = "AKTIF";
-            document.getElementById('view-login').classList.add('d-none');
-            document.getElementById('view-exam').classList.remove('d-none');
-            document.getElementById('wrapper-timer').classList.remove('d-none');
-            document.getElementById('txt-mapel').innerText = res.mapel;
-            showQuest();
-            showNav();
-            startTimer();
-            Swal.close();
-          }).ambilJawabanSementara(t, n, k, res.mapel);
+          // Tampilkan info login via apa
+          Swal.fire({
+            title: 'Login Berhasil!',
+            html: `Login via: <strong>${res.loginVia}</strong><br>Nama: ${res.namaSiswa}<br>Mapel: ${res.mapel}`,
+            icon: 'success',
+            timer: 2000,
+            showConfirmButton: false
+          });
+
+          jawUser = res.jawabanTersimpan || {};
+          sisa = res.sisaWaktuServer;
+
+          if (sisa <= 0) {
+            Swal.fire('Waktu Habis', 'Anda tidak dapat mengikuti ujian karena waktu telah habis.', 'error').then(() => location.reload());
+            return;
+          }
+
+          statusUjian = "AKTIF";
+          document.getElementById('view-login').classList.add('d-none');
+          document.getElementById('view-exam').classList.remove('d-none');
+          document.getElementById('wrapper-timer').classList.remove('d-none');
+          document.getElementById('txt-mapel').innerText = res.mapel;
+          showQuest();
+          showNav();
+          startTimer();
+          Swal.close();
         } else {
           Swal.fire('Gagal', res.pesan, 'error');
         }
-      }).cekLogin(t, n, k);
-      enterFullscreen();
+      }).cekLogin(t, userInput, k);
     }
 
     function showQuest() {
@@ -474,9 +486,12 @@
     }
 
     function simpanJawabanKeServer(soalId, jawaban) {
-      if (!currentToken) return;
-      google.script.run.withFailureHandler(err => { console.error(err); syncQueue.push({ soalId, jawaban }); scheduleRetry(); })
-        .simpanJawabanSementara(currentToken, currentNama, currentKelas, currentMapel, soalId, jawaban);
+      if (!currentToken || !currentUsername) return;
+      google.script.run.withFailureHandler(err => {
+        console.error(err);
+        syncQueue.push({ soalId, jawaban });
+        scheduleRetry();
+      }).simpanJawabanSementara(currentToken, currentUsername, currentNama, currentKelas, currentMapel, soalId, jawaban);
     }
 
     function scheduleRetry() {
@@ -554,9 +569,9 @@
     }
 
     function simpanSisaWaktuKeServer(sisaWaktu) {
-      if (!currentToken) return;
+      if (!currentToken || !currentUsername) return;
       google.script.run.withFailureHandler(err => console.error('Gagal simpan sisa waktu:', err))
-        .simpanSisaWaktu(currentToken, currentNama, currentKelas, currentMapel, sisaWaktu);
+        .simpanSisaWaktu(currentToken, currentUsername, currentKelas, currentMapel, sisaWaktu);
     }
 
     function konfirmasiSelesai() {
@@ -697,7 +712,7 @@
     document.addEventListener('fullscreenchange', onFullscreenChange);
     document.addEventListener('webkitfullscreenchange', onFullscreenChange);
 
-    
+
     // Shortcut Ctrl+Space untuk bypass (keluar fullscreen)
     window.addEventListener('keydown', function (e) {
       if (e.ctrlKey && e.code === 'Space') {
