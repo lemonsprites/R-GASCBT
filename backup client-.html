@@ -231,47 +231,52 @@
         <button class="btn btn-primary w-100 py-3 fw-bold shadow" onclick="mulaiProses()">MULAI UJIAN</button>
 
         <div class='w-100 text-center mt-3'>
-          <a href="https://script.google.com/macros/s/AKfycbznD6mc6F8jIrn_VzyMpTzlnf43rPu4E6M45qvBKX0/dev?page=admin">Masuk Admin Panel</a>
+          <a href="https://script.google.com/macros/s/AKfycbznD6mc6F8jIrn_VzyMpTzlnf43rPu4E6M45qvBKX0/dev?page=admin">Masuk
+            Admin Panel</a>
         </div>
       </div>
 
-      <div id="view-exam" class="row d-none">
-        <div class="col-lg-8 mb-4">
-          <div class="q-card p-4">
-            <div class="d-flex justify-content-between border-bottom pb-3 mb-4">
-              <span id="txt-mapel" class="badge bg-secondary p-2">MAPEL</span>
-              <span id="txt-no" class="fw-bold text-primary">SOAL NOMOR 1</span>
-            </div>
 
-            <div id="area-soal" class="mb-5" style="min-height: 250px;"></div>
 
-            <div class="row g-2 text-center border-top pt-4">
-              <div class="col-4"><button class="btn btn-outline-dark w-100 py-2" onclick="move(-1)">KEMBALI</button>
-              </div>
-              <div class="col-4">
-                <button id="btn-ragu" class="btn btn-warning w-100 py-2 fw-bold" onclick="setRagu()">RAGU-RAGU</button>
-              </div>
-              <div class="col-4"><button class="btn btn-primary w-100 py-2 fw-bold" onclick="move(1)">LANJUT</button>
-              </div>
-            </div>
+    </div>
+
+    <div id="view-exam" class="row d-none">
+      <div class="col-lg-8 mb-4">
+        <div class="q-card p-4">
+          <div class="d-flex justify-content-between border-bottom pb-3 mb-4">
+            <span id="txt-mapel" class="badge bg-secondary p-2">MAPEL</span>
+            <span id="txt-no" class="fw-bold text-primary">SOAL NOMOR 1</span>
           </div>
-        </div>
 
-        <div class="col-lg-4">
-          <div class="q-card p-3">
-            <h6 class="fw-bold mb-3"><i class="bi bi-grid-3x3-gap-fill me-2"></i>NOMOR SOAL</h6>
-            <div id="area-nav" class="d-flex flex-wrap justify-content-center mb-4"></div>
-            <hr>
-            <div id="info-lock" class="text-center mb-2 small text-danger fw-bold"></div>
-            <button id="btn-selesai" class="btn btn-danger w-100 fw-bold py-2 shadow-sm" disabled
-              onclick="konfirmasiSelesai()">SELESAI UJIAN</button>
-            <button id="btn-reload" class="btn-reload" onclick="reloadJawabanTersimpan()" style="display:none;">
-              <i class="bi bi-arrow-repeat"></i> Muat Ulang Jawaban
-            </button>
+          <div id="area-soal" class="mb-5" style="min-height: 250px;">
+
+          </div>
+
+          <div class="row g-2 text-center border-top pt-4">
+            <div class="col-4"><button class="btn btn-outline-dark w-100 py-2" onclick="move(-1)">KEMBALI</button>
+            </div>
+            <div class="col-4">
+              <button id="btn-ragu" class="btn btn-warning w-100 py-2 fw-bold" onclick="setRagu()">RAGU-RAGU</button>
+            </div>
+            <div class="col-4"><button class="btn btn-primary w-100 py-2 fw-bold" onclick="move(1)">LANJUT</button>
+            </div>
           </div>
         </div>
       </div>
 
+      <div class="col-lg-4">
+        <div class="q-card p-3">
+          <h6 class="fw-bold mb-3"><i class="bi bi-grid-3x3-gap-fill me-2"></i>NOMOR SOAL</h6>
+          <div id="area-nav" class="d-flex flex-wrap justify-content-center mb-4"></div>
+          <hr>
+          <div id="info-lock" class="text-center mb-2 small text-danger fw-bold"></div>
+          <button id="btn-selesai" class="btn btn-danger w-100 fw-bold py-2 shadow-sm" disabled
+            onclick="konfirmasiSelesai()">SELESAI UJIAN</button>
+          <button id="btn-reload" class="btn-reload" onclick="reloadJawabanTersimpan()" style="display:none;">
+            <i class="bi bi-arrow-repeat"></i> Muat Ulang Jawaban
+          </button>
+        </div>
+      </div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
@@ -413,6 +418,7 @@
               console.log('Final jawUser setelah load:', jawUser);
               console.log('Total jawaban:', Object.keys(jawUser).length);
 
+              enterFullscreen();
             } else {
               Swal.fire('Gagal', res.pesan, 'error');
             }
@@ -422,7 +428,6 @@
             Swal.fire('Error', 'Terjadi kesalahan: ' + err.message, 'error');
           })
           .cekLogin(t, userInput, k);
-        enterFullscreen();
       }
 
       // ==================== TAMPIL SOAL ====================
