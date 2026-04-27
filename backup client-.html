@@ -319,6 +319,7 @@
               // Kosongkan jawUser dulu
               jawUser = {};
 
+
               for (let soalId in jawaban) {
                 jawUser[soalId] = jawaban[soalId];
                 count++;
@@ -354,80 +355,94 @@
         currentToken = t;
         currentKelas = k;
 
-        Swal.fire({ title: 'Menyiapkan Soal...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+        Swal.fire({
+          title: 'Menyiapkan Soal...',
+          allowOutsideClick: false,
+          didOpen: () => Swal.showLoading()
+        });
 
         google.script.run
           .withSuccessHandler(res => {
             console.log('Response dari server:', res);
 
-
-
             if (res.status === "success") {
+              // 1. Sinkronisasi Data
               quest = res.soal;
               kunci = res.kunci;
               currentMapel = res.mapel;
               currentUsername = res.username;
               currentNama = res.namaSiswa;
               currentLoginVia = res.loginVia;
-
-              // ===== PERBAIKAN UTAMA: Muat jawaban tersimpan =====
-              jawUser = {};
-              if (res.jawabanTersimpan && typeof res.jawabanTersimpan === 'object') {
-                for (let soalId in res.jawabanTersimpan) {
-                  jawUser[soalId] = res.jawabanTersimpan[soalId];
-                }
-                console.log('Jawaban dimuat:', jawUser);
-              } else {
-                console.log('Tidak ada jawaban tersimpan, res.jawabanTersimpan =', res.jawabanTersimpan);
-              }
-
               sisa = res.sisaWaktuServer;
 
+              jawUser = {};
+              if (res.jawabanTersimpan && typeof res.jawabanTersimpan === 'object') {
+                Object.assign(jawUser, res.jawabanTersimpan);
+              }
+
               if (sisa <= 0) {
-                Swal.fire('Waktu Habis', 'Anda tidak dapat mengikuti ujian karena waktu telah habis.', 'error')
-                  .then(() => location.reload());
+                Swal.fire('Waktu Habis', 'Sesi ujian telah berakhir.', 'error').then(() => location.reload());
                 return;
               }
 
-              // Tampilkan info login dengan jumlah jawaban
+              // 2. Tampilkan Konfirmasi (User Gesture Trigger)
               Swal.fire({
                 title: 'Login Berhasil!',
-                html: `Login via: <strong>${res.loginVia}</strong><br>
-                 Nama: ${res.namaSiswa}<br>
-                 Mapel: ${res.mapel}<br>
-                 <span style="color:green">Jawaban tersimpan: ${Object.keys(jawUser).length} soal</span>`,
+                html: `Selamat mengerjakan, <strong>${res.namaSiswa}</strong>!<br>
+                 <span style="color:green">Jawaban dipulihkan: ${Object.keys(jawUser).length} soal</span>`,
                 icon: 'success',
-                timer: 2500,
-                showConfirmButton: false
+                confirmButtonText: `${Object.keys(jawUser).length > 0 ? 'Lanjutkan' : 'Mulai'} Ujian Sekarang`,
+                allowOutsideClick: false
+              }).then((result) => {
+                if (result.isConfirmed) {
+
+                  // --- BAGIAN KRITIKAL: Fullscreen harus dipicu di sini! ---
+                  enterFullscreen();
+
+                  // Eksekusi UI transisi
+                  statusUjian = "AKTIF";
+                  document.getElementById('view-login').classList.add('d-none');
+                  document.getElementById('view-exam').classList.remove('d-none');
+                  document.getElementById('wrapper-timer').classList.remove('d-none');
+                  document.getElementById('txt-mapel').innerText = res.mapel;
+                  document.getElementById('btn-reload').style.display = 'block';
+
+                  idx = 0;
+                  showQuest();
+                  showNav();
+                  startTimer();
+                }
               });
 
-              statusUjian = "AKTIF";
-              document.getElementById('view-login').classList.add('d-none');
-              document.getElementById('view-exam').classList.remove('d-none');
-              document.getElementById('wrapper-timer').classList.remove('d-none');
-              document.getElementById('txt-mapel').innerText = res.mapel;
-              document.getElementById('btn-reload').style.display = 'block';
+              // Mekanisme Auto-Healing tetap berjalan di background
+              verifikasiDataRedis();
 
-              // Tampilkan soal pertama
-              idx = 0;
-              showQuest();
-              showNav();
-              startTimer();
-
-              // Debug: tampilkan status jawUser di console
-              console.log('Final jawUser setelah load:', jawUser);
-              console.log('Total jawaban:', Object.keys(jawUser).length);
-
-              enterFullscreen();
             } else {
               Swal.fire('Gagal', res.pesan, 'error');
             }
           })
           .withFailureHandler(err => {
-            console.error('Error cekLogin:', err);
-            Swal.fire('Error', 'Terjadi kesalahan: ' + err.message, 'error');
+            Swal.fire('Error', 'Koneksi bermasalah: ' + err.message, 'error');
           })
           .cekLogin(t, userInput, k);
+      }
+
+      function verifikasiDataRedis() {
+        // Jika sudah ada jawaban, tidak perlu tarik ulang
+        if (Object.keys(jawUser).length > 0) return;
+
+        console.warn('⚠️ Mendeteksi jawaban kosong di awal, mencoba re-sync silent...');
+
+        google.script.run
+          .withSuccessHandler(jawaban => {
+            if (jawaban && Object.keys(jawaban).length > 0) {
+              Object.assign(jawUser, jawaban);
+              showQuest();
+              showNav();
+              console.log('✅ Re-sync silent berhasil!');
+            }
+          })
+          .ambilJawabanSementara(currentToken, currentUsername, currentMapel);
       }
 
       // ==================== TAMPIL SOAL ====================
@@ -510,7 +525,7 @@
         delete ragu[soalId];
         showQuest();
         showNav();
-        simpanJawabanKeServer(soalId, optKey);
+        // simpanJawabanKeServer(soalId, optKey);
       }
 
       function simpanJawabanKeServer(soalId, jawaban) {
@@ -566,7 +581,7 @@
           if (ragu[s.id]) cls = 'status-ragu';
           else if (jawUser[s.id]) cls = 'status-yakin';
           let act = i === idx ? 'active-now' : '';
-          h += `<button class="btn btn-nomor ${cls} ${act}" onclick="idx=${i};showQuest();showNav()">${i + 1}</button>`;
+          h += `<button class="btn btn-nomor ${cls} ${act}" onclick="navigasiKe(${i})">${i + 1}</button>`;
         });
 
         document.getElementById('area-nav').innerHTML = h;
@@ -576,11 +591,35 @@
 
       function move(n) {
         if (idx + n >= 0 && idx + n < quest.length) {
+          // 1. Ambil data soal yang sedang dibuka SAAT INI (sebelum pindah)
+          const soalAktif = quest[idx];
+          const idSoalSekarang = soalAktif.id;
+          const jawabanSekarang = jawUser[idSoalSekarang];
+
+          // 2. Kirim ke server hanya jika ada jawabannya (Debounce saat pindah soal)
+          if (jawabanSekarang) {
+            simpanJawabanKeServer(idSoalSekarang, jawabanSekarang);
+          }
+
+          // 3. Pindah ke soal berikutnya/sebelumnya
           idx += n;
           showQuest();
           showNav();
-          simpanSisaWaktuKeServer(sisa);
+
+          // Simpan sisa waktu opsional setiap pindah soal agar lebih akurat
+          // simpanSisaWaktuKeServer(sisa);
         }
+      }
+
+      // Tambahkan fungsi baru
+      function navigasiKe(tujuan) {
+        const soalAktif = quest[idx];
+        if (jawUser[soalAktif.id]) {
+          simpanJawabanKeServer(soalAktif.id, jawUser[soalAktif.id]);
+        }
+        idx = tujuan;
+        showQuest();
+        showNav();
       }
 
       // ==================== TIMER ====================
@@ -613,23 +652,37 @@
           let s = sisa % 60;
           display.innerText = `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 
-          if (sisa > 600) {
-            let sisaKunci = sisa - 600;
-            let mk = Math.floor(sisaKunci / 60);
-            let sk = sisaKunci % 60;
-            infoLock.innerHTML = `<i class="bi bi-lock-fill"></i> Selesai aktif dalam: ${mk}:${sk.toString().padStart(2, '0')}`;
-            infoLock.classList.add('text-danger');
-            infoLock.classList.remove('text-success');
-            btnSelesai.disabled = true;
-          } else {
-            infoLock.innerHTML = `<i class="bi bi-unlock-fill"></i> Tombol Selesai Terbuka`;
+          // --- LOGIKA TOMBOL SELESAI ---
+          const totalSoal = quest.length;
+          const terjawab = Object.keys(jawUser).length;
+          const isSemuaTerjawab = terjawab >= totalSoal && totalSoal > 0;
+          const isWaktuKritis = sisa <= 600;
+
+          if (isSemuaTerjawab || isWaktuKritis) {
+            // Terbuka jika sudah jawab semua ATAU sisa waktu <= 10 menit
+            let pesan = isSemuaTerjawab ?
+              `<i class="bi bi-unlock-fill"></i> Semua Soal Terjawab` :
+              `<i class="bi bi-unlock-fill"></i> Tombol Selesai Terbuka`;
+
+            infoLock.innerHTML = pesan;
             infoLock.classList.remove('text-danger');
             infoLock.classList.add('text-success');
             btnSelesai.disabled = false;
+          } else {
+            // Masih terkunci (belum jawab semua DAN waktu masih banyak)
+            let sisaKunci = sisa - 600;
+            let mk = Math.floor(sisaKunci / 60);
+            let sk = sisaKunci % 60;
+
+            infoLock.innerHTML = `<i class="bi bi-lock-fill"></i> Selesai aktif dlm: ${mk}:${sk.toString().padStart(2, '0')} (atau jawab semua)`;
+            infoLock.classList.add('text-danger');
+            infoLock.classList.remove('text-success');
+            btnSelesai.disabled = true;
           }
+          // ----------------------------
 
           const now = Date.now();
-          if (!lastSavedTime || (now - lastSavedTime) >= 10000) {
+          if (!lastSavedTime || (now - lastSavedTime) >= 600000) {
             lastSavedTime = now;
             simpanSisaWaktuKeServer(sisa);
           }
@@ -646,7 +699,14 @@
 
       // ==================== SELESAI UJIAN ====================
       function konfirmasiSelesai() {
+        const soalTerakhir = quest[idx].id;
+        if (jawUser[soalTerakhir]) {
+          simpanJawabanKeServer(soalTerakhir, jawUser[soalTerakhir]);
+        }
+
         if (isSubmitting) return;
+
+
 
         const raguCount = Object.keys(ragu).filter(id => ragu[id] === true).length;
         if (raguCount > 0) {
@@ -768,9 +828,16 @@
 
       function enterFullscreen() {
         const docEl = document.documentElement;
-        const requestMethod = docEl.requestFullscreen || docEl.webkitRequestFullscreen || docEl.msRequestFullscreen;
-        if (requestMethod) {
-          requestMethod.call(docEl).catch(err => console.warn('Gagal fullscreen:', err));
+        try {
+          if (docEl.requestFullscreen) {
+            docEl.requestFullscreen();
+          } else if (docEl.webkitRequestFullscreen) { /* Safari */
+            docEl.webkitRequestFullscreen();
+          } else if (docEl.msRequestFullscreen) { /* IE11 */
+            docEl.msRequestFullscreen();
+          }
+        } catch (err) {
+          console.warn("Fullscreen diblokir browser: ", err.message);
         }
       }
 

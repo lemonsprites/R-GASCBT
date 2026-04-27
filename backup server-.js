@@ -1,146 +1,231 @@
 const SS = SpreadsheetApp.getActiveSpreadsheet();
 const SHEET_PERMANEN = 'Jawaban';
-const SHEET_SEMENTARA = 'JawabanSementara';
-const SHEET_START_TIME = 'StartTime';
 
-// ==================== DATA SISWA ====================
-function getDataSiswa() {
-  const sheet = SS.getSheetByName('Siswa');
-  if (!sheet) throw new Error("Sheet 'Siswa' tidak ditemukan!");
-  return sheet.getDataRange().getValues();
+// ==================== KONFIGURASI REDIS ====================
+function getRedisConfig_() {
+  return {
+    endpoint: PropertiesService.getScriptProperties().getProperty('REDIS_ENDPOINT'),
+    token: PropertiesService.getScriptProperties().getProperty('REDIS_TOKEN')
+  };
 }
 
-function validasiSiswa(inputValue, kelasUser) {
+
+
+// Helper untuk request HTTP ke Redis (GET, POST, dll)
+function redisRequest_(method, path, body = null) {
+  const cfg = getRedisConfig_();
+  if (!cfg.endpoint || !cfg.token) throw new Error("Redis tidak dikonfigurasi");
+  const url = `${cfg.endpoint}${path.startsWith('/') ? path : '/' + path}`;
+  const options = {
+    method: method,
+    headers: { 'Authorization': `Bearer ${cfg.token}` },
+    muteHttpExceptions: true
+  };
+  if (body) options.payload = body;
+  return UrlFetchApp.fetch(url, options);
+}
+
+// === OPERASI REDIS UNTUK DATA DINAMIS ===
+
+// Simpan jawaban sementara (HASH)
+function simpanKeRedis(token, username, soalId, jawaban) {
   try {
-    const dataSiswa = getDataSiswa();
-    if (dataSiswa.length <= 1) return { valid: false, pesan: "Data siswa kosong!" };
-    const inputClean = String(inputValue).trim();
-    if (!inputClean) return { valid: false, pesan: "Username/Nama harus diisi!" };
-    for (let i = 1; i < dataSiswa.length; i++) {
-      const usernameSheet = String(dataSiswa[i][0]).trim();
-      const namaSheet = String(dataSiswa[i][1]).trim();
-      const kelasSheet = String(dataSiswa[i][2]).trim();
-      if (usernameSheet === inputClean || namaSheet.toLowerCase() === inputClean.toLowerCase()) {
-        if (kelasSheet === kelasUser) {
-          return { valid: true, username: usernameSheet, nama: namaSheet, kelas: kelasSheet,
-                   loginVia: usernameSheet === inputClean ? 'username' : 'nama' };
-        } else {
-          return { valid: false, pesan: `Kelas tidak sesuai! Anda terdaftar di kelas ${kelasSheet}.` };
-        }
-      }
-    }
-    return { valid: false, pesan: `"${inputClean}" tidak ditemukan.` };
+    const key = `cbt:${token}:${username}`;
+    const field = soalId;
+    const value = jawaban;
+    const path = `/hset/${encodeURIComponent(key)}/${encodeURIComponent(field)}/${encodeURIComponent(value)}`;
+    redisRequest_('GET', path);
+    return true;
   } catch (e) {
-    return { valid: false, pesan: e.message };
-  }
-}
-
-// ==================== DATA JADWAL ====================
-function getDataJadwal() {
-  const sheet = SS.getSheetByName('Jadwal');
-  if (!sheet) throw new Error("Sheet 'Jadwal' tidak ditemukan!");
-  return sheet.getDataRange().getValues();
-}
-
-// ==================== CEK SUDAH UJIAN (SHEET PERMANEN) ====================
-function cekSudahUjian(username, nama, kelas, mapel) {
-  try {
-    const sheet = SS.getSheetByName(SHEET_PERMANEN);
-    if (!sheet) return false;
-    const rows = sheet.getDataRange().getValues();
-    for (let i = 1; i < rows.length; i++) {
-      const row = rows[i];
-      if ((row[8] || '') === username && row[3] === mapel) return true;
-      if ((row[1] || '') === nama && (row[2] || '') === kelas && row[3] === mapel) return true;
-    }
+    console.error('simpanKeRedis error:', e.message);
     return false;
-  } catch(e) { return false; }
-}
-
-// ==================== START TIME (SHEET) ====================
-function getStartTimeSheet() {
-  let sheet = SS.getSheetByName(SHEET_START_TIME);
-  if (!sheet) {
-    sheet = SS.insertSheet(SHEET_START_TIME);
-    sheet.getRange(1, 1, 1, 2).setValues([['key', 'timestamp']]);
-    sheet.setFrozenRows(1);
   }
-  return sheet;
 }
 
-function simpanStartTime(key, timestamp) {
-  const sheet = getStartTimeSheet();
-  const data = sheet.getDataRange().getValues();
-  for (let i = 1; i < data.length; i++) {
-    if (data[i][0] === key) {
-      sheet.getRange(i + 1, 2).setValue(timestamp);
-      return;
+// Ambil semua jawaban sementara (HGETALL)
+function ambilSemuaJawabanDariRedis(token, username) {
+  try {
+    const key = `cbt:${token}:${username}`;
+    const path = `/hgetall/${encodeURIComponent(key)}`;
+    const resp = redisRequest_('GET', path);
+    const rawData = JSON.parse(resp.getContentText());
+
+    // Upstash mengembalikan { "result": ["field1", "value1", "field2", "value2"] }
+    const resultArr = rawData.result || [];
+    const jawabanObj = {};
+
+    for (let i = 0; i < resultArr.length; i += 2) {
+      jawabanObj[resultArr[i]] = resultArr[i + 1];
     }
+    return jawabanObj;
+  } catch (e) {
+    console.error('ambilSemuaJawabanDariRedis error:', e.message);
+    return {};
   }
-  sheet.appendRow([key, timestamp]);
 }
+
+// Simpan sisa waktu (SETEX)
+function simpanSisaWaktuRedis(token, username, mapel, sisaWaktu) {
+  try {
+    const key = `cbt:session:${token}:${username}:${mapel}`;
+    const path = `/setex/${encodeURIComponent(key)}/3600/${sisaWaktu}`;
+    redisRequest_('GET', path);
+    return true;
+  } catch (e) {
+    console.error('simpanSisaWaktuRedis error:', e.message);
+    return false;
+  }
+}
+
+// Ambil sisa waktu (GET)
+function ambilSisaWaktuRedis(token, username, mapel) {
+  try {
+    const key = `cbt:session:${token}:${username}:${mapel}`;
+    const path = `/get/${encodeURIComponent(key)}`;
+    const resp = redisRequest_('GET', path);
+    const rawData = JSON.parse(resp.getContentText());
+
+    // rawData format: { "result": "3600" }
+    if (rawData.result !== null && rawData.result !== undefined) {
+      return parseInt(rawData.result, 10);
+    }
+    return null;
+  } catch (e) {
+    console.error('ambilSisaWaktuRedis error:', e.message);
+    return null;
+  }
+}
+
+// Hapus data Redis (jawaban & session)
+function hapusDataRedis(token, username, mapel) {
+  try {
+    const key1 = `cbt:${token}:${username}`;
+    const key2 = `cbt:session:${token}:${username}:${mapel}`;
+    const path = `/del/${encodeURIComponent(key1)}/${encodeURIComponent(key2)}`;
+    redisRequest_('GET', path);
+    return true;
+  } catch (e) {
+    console.error('hapusDataRedis error:', e.message);
+    return false;
+  }
+}
+
+// Cek sudah ujian (EXISTS)
+function cekSudahUjianRedis(username, mapel) {
+  try {
+    const key = `done:${mapel}:${username}`;
+    const path = `/exists/${encodeURIComponent(key)}`;
+    const resp = redisRequest_('GET', path);
+    const rawData = JSON.parse(resp.getContentText());
+
+    // Upstash mengembalikan { "result": 1 } atau { "result": 0 }
+    return rawData.result === 1;
+  } catch (e) {
+    console.error('cekSudahUjianRedis error:', e.message);
+    return false;
+  }
+}
+
+// Tandai sudah ujian (SETEX)
+function tandaiSudahUjianRedis(username, mapel) {
+  try {
+    const key = `done:${mapel}:${username}`;
+    const path = `/setex/${encodeURIComponent(key)}/86400/1`;
+    redisRequest_('GET', path);
+    return true;
+  } catch (e) {
+    console.error('tandaiSudahUjianRedis error:', e.message);
+    return false;
+  }
+}
+
+// === START TIME (REDIS) ===
+function simpanStartTime(key, timestamp) {
+  try {
+    const path = `/setex/${encodeURIComponent(key)}/14400/${timestamp}`;
+    redisRequest_('GET', path);
+  } catch (e) { console.error('simpanStartTime error:', e.message); }
+}
+
 
 function ambilStartTime(key) {
-  const sheet = getStartTimeSheet();
-  const data = sheet.getDataRange().getValues();
-  for (let i = 1; i < data.length; i++) {
-    if (data[i][0] === key) return data[i][1];
+  try {
+    const path = `/get/${encodeURIComponent(key)}`;
+    const resp = redisRequest_('GET', path);
+    const rawData = JSON.parse(resp.getContentText());
+
+    // Jika result ada, kembalikan isinya (biasanya string timestamp)
+    if (rawData.result !== null && rawData.result !== undefined) {
+      return rawData.result;
+    }
+    return null;
+  } catch (e) {
+    console.error('ambilStartTime error:', e.message);
+    return null;
   }
-  return null;
 }
 
 function hapusStartTime(key) {
-  const sheet = getStartTimeSheet();
-  const data = sheet.getDataRange().getValues();
-  for (let i = 1; i < data.length; i++) {
-    if (data[i][0] === key) {
-      sheet.deleteRow(i + 1);
-      return;
-    }
-  }
-}
-
-// ==================== JAWABAN SEMENTARA (SHEET) ====================
-function getTempSheet() {
-  let sheet = SS.getSheetByName(SHEET_SEMENTARA);
-  if (!sheet) {
-    sheet = SS.insertSheet(SHEET_SEMENTARA);
-    sheet.getRange(1, 1, 1, 10).setValues([['token', 'nama', 'kelas', 'mapel', 'soalId', 'jawaban', 'timestamp', 'sisaWaktu', 'lastUpdate', 'username']]);
-    sheet.setFrozenRows(1);
-  }
-  return sheet;
-}
-
-function simpanJawabanSementara(token, username, nama, kelas, mapel, soalId, jawaban, sisaWaktu = null) {
   try {
-    const sheet = getTempSheet();
-    const data = sheet.getDataRange().getValues();
-    let foundRow = -1;
-    for (let i = 1; i < data.length; i++) {
-      if (data[i][0] === token && data[i][9] === username && data[i][3] === mapel && data[i][4] === soalId) {
-        foundRow = i + 1;
-        break;
-      }
-    }
-    const now = new Date();
-    if (foundRow !== -1) {
-      if (sisaWaktu !== null) {
-        sheet.getRange(foundRow, 6, 1, 4).setValues([[jawaban, now, sisaWaktu, now]]);
+    const path = `/del/${encodeURIComponent(key)}`;
+    redisRequest_('GET', path);
+  } catch (e) { console.error('hapusStartTime error:', e.message); }
+}
+
+// ==================== DATA MASTER (CacheService) ====================
+function getDataSiswa() {
+  const cache = CacheService.getScriptCache();
+  const key = 'data_siswa_master';
+  let cached = cache.get(key);
+  if (cached) return JSON.parse(cached);
+  const sheet = SS.getSheetByName('Siswa');
+  if (!sheet) return [];
+  const data = sheet.getDataRange().getValues();
+  cache.put(key, JSON.stringify(data), 600);
+  return data;
+}
+
+function validasiSiswa(inputValue, kelasUser) {
+  const dataSiswa = getDataSiswa();
+  if (dataSiswa.length <= 1) return { valid: false, pesan: "Data siswa kosong!" };
+  const inputClean = String(inputValue).trim();
+  if (!inputClean) return { valid: false, pesan: "Username/Nama harus diisi!" };
+  for (let i = 1; i < dataSiswa.length; i++) {
+    const usernameSheet = String(dataSiswa[i][0]).trim();
+    const namaSheet = String(dataSiswa[i][1]).trim();
+    const kelasSheet = String(dataSiswa[i][2]).trim();
+    if (usernameSheet === inputClean || namaSheet.toLowerCase() === inputClean.toLowerCase()) {
+      if (kelasSheet === kelasUser) {
+        return {
+          valid: true, username: usernameSheet, nama: namaSheet, kelas: kelasSheet,
+          loginVia: usernameSheet === inputClean ? 'username' : 'nama'
+        };
       } else {
-        sheet.getRange(foundRow, 6, 1, 2).setValues([[jawaban, now]]);
+        return { valid: false, pesan: `Kelas tidak sesuai! Anda terdaftar di kelas ${kelasSheet}.` };
       }
-    } else {
-      const newRow = [token, nama, kelas, mapel, soalId, jawaban, now];
-      if (sisaWaktu !== null) newRow.push(sisaWaktu, now);
-      else newRow.push('', '');
-      newRow.push(username);
-      sheet.appendRow(newRow);
     }
-    return true;
-  } catch (e) {
-    console.error('Error simpanJawabanSementara:', e);
-    return false;
   }
+  return { valid: false, pesan: `"${inputClean}" tidak ditemukan.` };
+}
+
+function getDataJadwal() {
+  const cache = CacheService.getScriptCache();
+  const key = 'data_jadwal_master';
+  let cached = cache.get(key);
+  if (cached) return JSON.parse(cached);
+  const sheet = SS.getSheetByName('Jadwal');
+  if (!sheet) return [];
+  const data = sheet.getDataRange().getValues();
+  cache.put(key, JSON.stringify(data), 600);
+  return data;
+}
+
+// ==================== FUNGSI YANG DIPANGGIL CLIENT ====================
+function simpanJawabanSementara(token, username, nama, kelas, mapel, soalId, jawaban, sisaWaktu = null) {
+  let ok = true;
+  if (soalId !== '_SESSION_') ok = ok && simpanKeRedis(token, username, soalId, jawaban);
+  if (sisaWaktu !== null) ok = ok && simpanSisaWaktuRedis(token, username, mapel, sisaWaktu);
+  return ok;
 }
 
 function simpanSisaWaktu(token, username, kelas, mapel, sisaWaktu) {
@@ -148,50 +233,17 @@ function simpanSisaWaktu(token, username, kelas, mapel, sisaWaktu) {
 }
 
 function ambilJawabanSementara(token, username, mapel) {
-  try {
-    const sheet = getTempSheet();
-    const data = sheet.getDataRange().getValues();
-    const jawabanMap = {};
-    for (let i = 1; i < data.length; i++) {
-      const row = data[i];
-      if (row[4] === '_SESSION_') continue;
-      if (row[0] === token && row[9] === username && row[3] === mapel) {
-        jawabanMap[row[4]] = row[5];
-      }
-    }
-    return jawabanMap;
-  } catch (e) {
-    return {};
-  }
+  return ambilSemuaJawabanDariRedis(token, username);
 }
 
 function ambilSisaWaktu(token, username, mapel) {
-  try {
-    const sheet = getTempSheet();
-    const data = sheet.getDataRange().getValues();
-    for (let i = 1; i < data.length; i++) {
-      const row = data[i];
-      if (row[0] === token && row[9] === username && row[3] === mapel && row[4] === '_SESSION_') {
-        const sisa = row[7] ? parseInt(row[7], 10) : null;
-        return { sisaWaktu: sisa, lastUpdate: row[8] };
-      }
-    }
-    return null;
-  } catch (e) {
-    return null;
-  }
+  const sisa = ambilSisaWaktuRedis(token, username, mapel);
+  if (sisa !== null) return { sisaWaktu: sisa, lastUpdate: new Date() };
+  return null;
 }
 
 function hapusJawabanSementara(token, username, mapel) {
-  try {
-    const sheet = getTempSheet();
-    const data = sheet.getDataRange().getValues();
-    for (let i = data.length - 1; i >= 1; i--) {
-      if (data[i][0] === token && data[i][9] === username && data[i][3] === mapel) {
-        sheet.deleteRow(i + 1);
-      }
-    }
-  } catch (e) {}
+  return hapusDataRedis(token, username, mapel);
 }
 
 // ==================== SIMPAN FINAL KE SHEET PERMANEN ====================
@@ -203,7 +255,6 @@ function simpanKeDatabaseFinal(payload) {
     const existingData = sheetPermanen.getDataRange().getValues();
     const isAlreadySubmitted = existingData.some(row => (row[8] || '') === payload.username && row[3] === payload.mapel);
     if (isAlreadySubmitted) return 0;
-    
     let skorBenar = 0;
     const totalSoal = Object.keys(payload.kunci).length;
     for (let id in payload.kunci) {
@@ -220,49 +271,104 @@ function simpanKeDatabaseFinal(payload) {
       new Date(), payload.nama, payload.kelas, payload.mapel, skorFinal,
       JSON.stringify(payload.jawaban), payload.pelanggaran, payload.username, payload.loginVia
     ]);
-    
+    tandaiSudahUjianRedis(payload.username, payload.mapel);
     const startKey = `START_${payload.token}_${payload.username}_${payload.mapel}`;
     hapusStartTime(startKey);
     hapusJawabanSementara(payload.token, payload.username, payload.mapel);
     return skorFinal;
   } catch (e) {
-    console.error('Error simpanKeDatabaseFinal:', e);
+    console.error('simpanKeDatabaseFinal error:', e);
     return -1;
   } finally {
     lock.releaseLock();
   }
 }
 
-// ==================== AMBIL SOAL DARI GOOGLE FORM ====================
+// ==================== AMBIL SOAL DARI GOOGLE FORM (LANGSUNG) ====================
 function getSoalDanKunci(url) {
+  const redisKey = `CACHE_SOAL:${Utilities.base64Encode(url).substring(0, 50)}`;
+
   try {
-    if (!url) throw new Error("URL kosong");
+    // === 1. CEK CACHE ===
+    const cacheResp = redisRequest_('GET', `/get/${encodeURIComponent(redisKey)}`);
+    const cacheData = JSON.parse(cacheResp.getContentText());
+
+    if (cacheData && cacheData.result) {
+      return JSON.parse(cacheData.result);
+    }
+
+    // === 2. AMBIL DARI GOOGLE FORM ===
     const form = FormApp.openByUrl(url);
     const items = form.getItems();
     let soal = [], kunci = {};
+
     items.forEach(item => {
       const tipe = item.getType().toString();
       const id = item.getId().toString();
       let itemObj = null;
+
       if (tipe === "MULTIPLE_CHOICE") itemObj = item.asMultipleChoiceItem();
       else if (tipe === "CHECKBOX") itemObj = item.asCheckboxItem();
       else if (tipe === "LIST") itemObj = item.asListItem();
+
       if (itemObj) {
+        const deskripsi = itemObj.getHelpText() || "";
+        let linkGambarPertanyaan = null;
+
+        // 1. Cek illust di helpText
+        let matchIllust = deskripsi.match(/illust:\s*(https?:\/\/\S+)/i);
+        if (matchIllust) {
+          linkGambarPertanyaan = matchIllust[1];
+        } else {
+          // 2. Jika tidak ada, cek di judul pertanyaan (title)
+          const judul = item.getTitle();
+          matchIllust = judul.match(/illust:(https?:\/\/[^\s]+)/i);
+          if (matchIllust) linkGambarPertanyaan = matchIllust[1];
+        }
+
         const choices = itemObj.getChoices();
         const opsi = [], jawabanBenar = [];
+
         choices.forEach(choice => {
           const value = choice.getValue();
-          opsi.push({ text: value });
-          if (choice.isCorrectAnswer()) jawabanBenar.push(value);
+          let teksMurni = value;
+          let linkGambarOpsi = null;
+
+          if (value.includes("opsi:")) {
+            const matchOpsi = value.match(/opsi:\s*(https?:\/\/\S+)/i);
+            if (matchOpsi) {
+              linkGambarOpsi = matchOpsi[1];
+              teksMurni = value.replace(/opsi:\s*https?:\/\/\S+/i, "").trim();
+            }
+          }
+
+          opsi.push({ text: teksMurni || "", imageUrl: linkGambarOpsi });
+          if (choice.isCorrectAnswer()) jawabanBenar.push(teksMurni);
         });
-        soal.push({ id, tipe, pertanyaan: item.getTitle(), opsi, gambarPertanyaan: null });
+
+        soal.push({
+          id, tipe, pertanyaan: item.getTitle(),
+          opsi: opsi, gambarPertanyaan: linkGambarPertanyaan
+        });
+
         kunci[id] = jawabanBenar.length === 1 ? jawabanBenar[0] : jawabanBenar;
       }
     });
-    if (soal.length === 0) console.warn("⚠️ Tidak ada soal yang dihasilkan");
-    return { soal, kunci };
+
+    const hasilUjian = { soal, kunci };
+
+    // === 3. SIMPAN KE REDIS MENGGUNAKAN POST (Lebih Aman & Kapasitas Besar) ===
+    // Path untuk SET dengan EXPIRE (PX = milidetik, 7200000 = 2 jam)
+    const expireMs = 7200000;
+    const setPath = `/set/${encodeURIComponent(redisKey)}?ex=${7200}`;
+
+    // Kirim JSON di dalam body POST agar tidak terkena limit URL
+    redisRequest_('POST', setPath, JSON.stringify(hasilUjian));
+
+    return hasilUjian;
+
   } catch (e) {
-    console.error("Error getSoalDanKunci: " + e.message);
+    console.error("Error getSoalDanKunci:", e.message);
     return { soal: [], kunci: {} };
   }
 }
@@ -270,7 +376,6 @@ function getSoalDanKunci(url) {
 // ==================== CEK LOGIN ====================
 function cekLogin(tokenUser, inputUser, kelasUser) {
   try {
-    console.log('cekLogin start');
     const dataJadwal = getDataJadwal();
     if (dataJadwal.length <= 1) return { status: "error", pesan: "Data jadwal kosong!" };
     const tokenInput = String(tokenUser).trim();
@@ -334,9 +439,11 @@ function cekLogin(tokenUser, inputUser, kelasUser) {
     const endTimestamp = startTimestamp + (durasiMenit * 60 * 1000);
     if (nowTimestamp > endTimestamp) return { status: "error", pesan: "Waktu ujian telah berakhir." };
 
-    const sudahUjian = cekSudahUjian(usernameAsli, namaAsli, kelasUser, mapel);
+    // CEK SUDAH UJIAN (REDIS)
+    const sudahUjian = cekSudahUjianRedis(usernameAsli, mapel);
     if (sudahUjian) return { status: "error", pesan: `${namaAsli} sudah mengikuti ujian ${mapel}!` };
 
+    // START TIME (REDIS)
     const startKey = `START_${tokenInput}_${usernameAsli}_${mapel}`;
     let startTimeUjian = ambilStartTime(startKey);
     if (!startTimeUjian) {
@@ -347,12 +454,15 @@ function cekLogin(tokenUser, inputUser, kelasUser) {
     const elapsed = Math.floor((Date.now() - parseInt(startTimeUjian)) / 1000);
     const sisaServer = Math.max(0, durasiDetik - elapsed);
 
-    const dataUjian = getSoalDanKunci(linkForm);
+    // AMBIL SOAL (LANGSUNG DARI FORM)
+    const dataUjian = getSoalDanKunci(linkForm, tokenInput);
     if (!dataUjian.soal || dataUjian.soal.length === 0) {
       return { status: "error", pesan: "Gagal memuat soal ujian. Pastikan form dapat diakses dan berisi pertanyaan." };
     }
 
+    // JAWABAN SEMENTARA (REDIS)
     const jawabanTersimpan = ambilJawabanSementara(tokenInput, usernameAsli, mapel);
+
     return {
       status: "success", token: tokenInput, sisaWaktuServer: sisaServer,
       mapel: mapel, durasi: durasiMenit,
@@ -361,7 +471,7 @@ function cekLogin(tokenUser, inputUser, kelasUser) {
       jawabanTersimpan: jawabanTersimpan
     };
   } catch (e) {
-    console.error("FATAL error in cekLogin:", e.message, e.stack);
+    console.error("FATAL cekLogin:", e.message, e.stack);
     return { status: "error", pesan: "Server error: " + e.message };
   }
 }
