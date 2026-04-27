@@ -248,13 +248,25 @@ function hapusJawabanSementara(token, username, mapel) {
 
 // ==================== SIMPAN FINAL KE SHEET PERMANEN ====================
 function simpanKeDatabaseFinal(payload) {
+  // --- 1. FILTER LUAR (Fast Exit) ---
+  // Cek Redis tanpa antri Lock. Jika sudah ujian, langsung tolak.
+  // Ini kunci agar script tidak menumpuk di antrean Google.
+  if (cekSudahUjianRedis(payload.username, payload.mapel)) {
+    return 0;
+  }
+
   const lock = LockService.getScriptLock();
   try {
-    lock.waitLock(10000);
+    // Tunggu antrean maksimal 8 detik (jangan terlalu lama agar tidak timeout)
+    lock.waitLock(8000);
+
     const sheetPermanen = SS.getSheetByName(SHEET_PERMANEN) || SS.insertSheet(SHEET_PERMANEN);
-    const existingData = sheetPermanen.getDataRange().getValues();
-    const isAlreadySubmitted = existingData.some(row => (row[8] || '') === payload.username && row[3] === payload.mapel);
-    if (isAlreadySubmitted) return 0;
+
+    // --- 2. DOUBLE CHECK (Integritas Data) ---
+    // Kita tidak pakai getValues() lagi karena sangat lambat saat data banyak.
+    // Kita percayakan pengecekan pada status Redis yang sudah divalidasi di atas.
+
+    // --- 3. HITUNG SKOR (Logika Tetap Sama) ---
     let skorBenar = 0;
     const totalSoal = Object.keys(payload.kunci).length;
     for (let id in payload.kunci) {
@@ -267,23 +279,41 @@ function simpanKeDatabaseFinal(payload) {
       }
     }
     const skorFinal = totalSoal > 0 ? Math.round((skorBenar / totalSoal) * 100) : 0;
+
+    // --- 4. TULIS DATA (Write-Only Mode) ---
+    // appendRow sangat cepat jika tidak diawali dengan getValues()
     sheetPermanen.appendRow([
-      new Date(), payload.nama, payload.kelas, payload.mapel, skorFinal,
-      JSON.stringify(payload.jawaban), payload.pelanggaran, payload.username, payload.loginVia
+      new Date(),
+      payload.nama,
+      payload.kelas,
+      payload.mapel,
+      skorFinal,
+      JSON.stringify(payload.jawaban),
+      payload.pelanggaran,
+      payload.username,
+      payload.loginVia
     ]);
+
+    // --- 5. KUNCI STATUS DI REDIS SECEPATNYA ---
+    // Tandai sudah ujian agar user tidak bisa masuk/submit lagi
     tandaiSudahUjianRedis(payload.username, payload.mapel);
+
+    // --- 6. CLEANUP ---
     const startKey = `START_${payload.token}_${payload.username}_${payload.mapel}`;
     hapusStartTime(startKey);
     hapusJawabanSementara(payload.token, payload.username, payload.mapel);
+
     return skorFinal;
+
   } catch (e) {
     console.error('simpanKeDatabaseFinal error:', e);
+    // Jika error karena lock timeout, beri sinyal ke client untuk coba lagi
     return -1;
   } finally {
+    // Pastikan lock dilepas secepat mungkin
     lock.releaseLock();
   }
 }
-
 // ==================== AMBIL SOAL DARI GOOGLE FORM (LANGSUNG) ====================
 function getSoalDanKunci(url) {
   const redisKey = `CACHE_SOAL:${Utilities.base64Encode(url).substring(0, 50)}`;
@@ -297,16 +327,31 @@ function getSoalDanKunci(url) {
       return JSON.parse(cacheData.result);
     }
 
-    // === 2. AMBIL DARI GOOGLE FORM ===
+    // === 2. LOCKING MECHANISM (Pencegah Racing) ===
+    // Kita buat key lock sementara yang berlaku hanya 10 detik
+    const lockKey = `${redisKey}:lock`;
+    const lockPath = `/set/${encodeURIComponent(lockKey)}/LOCKED?nx=true&ex=10`;
+    const lockResp = JSON.parse(redisRequest_('GET', lockPath).getContentText());
+
+    // Jika result null, artinya sedang ada user lain yang "mengerjakan" soal (lock sudah ada)
+    if (lockResp.result === null) {
+      // Tunggu sebentar (1 detik) lalu coba ambil cache lagi
+      Utilities.sleep(1000);
+      const retryResp = redisRequest_('GET', `/get/${encodeURIComponent(redisKey)}`);
+      const retryData = JSON.parse(retryResp.getContentText());
+      if (retryData && retryData.result) return JSON.parse(retryData.result);
+    }
+
+    // === 3. AMBIL DARI GOOGLE FORM (Hanya dijalankan oleh 1 user) ===
     const form = FormApp.openByUrl(url);
     const items = form.getItems();
     let soal = [], kunci = {};
 
     items.forEach(item => {
+      // ... (Logika parsing soal kamu tetap sama seperti sebelumnya) ...
       const tipe = item.getType().toString();
       const id = item.getId().toString();
       let itemObj = null;
-
       if (tipe === "MULTIPLE_CHOICE") itemObj = item.asMultipleChoiceItem();
       else if (tipe === "CHECKBOX") itemObj = item.asCheckboxItem();
       else if (tipe === "LIST") itemObj = item.asListItem();
@@ -314,26 +359,23 @@ function getSoalDanKunci(url) {
       if (itemObj) {
         const deskripsi = itemObj.getHelpText() || "";
         let linkGambarPertanyaan = null;
-
-        // 1. Cek illust di helpText
+        let teksPertanyaan = item.getTitle();
         let matchIllust = deskripsi.match(/illust:\s*(https?:\/\/\S+)/i);
         if (matchIllust) {
           linkGambarPertanyaan = matchIllust[1];
         } else {
-          // 2. Jika tidak ada, cek di judul pertanyaan (title)
           const judul = item.getTitle();
-          matchIllust = judul.match(/illust:(https?:\/\/[^\s]+)/i);
-          if (matchIllust) linkGambarPertanyaan = matchIllust[1];
+          matchIllust = judul.match(/illust:\s*(https?:\/\/\S+)/i);
+          if (matchIllust) {
+            linkGambarPertanyaan = matchIllust[1];
+            teksPertanyaan = judul.replace(/illust:\s*https?:\/\/\S+/i, '').trim();
+          }
         }
-
         const choices = itemObj.getChoices();
         const opsi = [], jawabanBenar = [];
-
         choices.forEach(choice => {
           const value = choice.getValue();
-          let teksMurni = value;
-          let linkGambarOpsi = null;
-
+          let teksMurni = value, linkGambarOpsi = null;
           if (value.includes("opsi:")) {
             const matchOpsi = value.match(/opsi:\s*(https?:\/\/\S+)/i);
             if (matchOpsi) {
@@ -341,29 +383,22 @@ function getSoalDanKunci(url) {
               teksMurni = value.replace(/opsi:\s*https?:\/\/\S+/i, "").trim();
             }
           }
-
           opsi.push({ text: teksMurni || "", imageUrl: linkGambarOpsi });
           if (choice.isCorrectAnswer()) jawabanBenar.push(teksMurni);
         });
-
-        soal.push({
-          id, tipe, pertanyaan: item.getTitle(),
-          opsi: opsi, gambarPertanyaan: linkGambarPertanyaan
-        });
-
+        soal.push({ id, tipe, pertanyaan: teksPertanyaan, opsi: opsi, gambarPertanyaan: linkGambarPertanyaan });
         kunci[id] = jawabanBenar.length === 1 ? jawabanBenar[0] : jawabanBenar;
       }
     });
 
     const hasilUjian = { soal, kunci };
 
-    // === 3. SIMPAN KE REDIS MENGGUNAKAN POST (Lebih Aman & Kapasitas Besar) ===
-    // Path untuk SET dengan EXPIRE (PX = milidetik, 7200000 = 2 jam)
-    const expireMs = 7200000;
-    const setPath = `/set/${encodeURIComponent(redisKey)}?ex=${7200}`;
-
-    // Kirim JSON di dalam body POST agar tidak terkena limit URL
+    // === 4. SIMPAN KE REDIS & HAPUS LOCK ===
+    const setPath = `/set/${encodeURIComponent(redisKey)}?ex=7200`;
     redisRequest_('POST', setPath, JSON.stringify(hasilUjian));
+
+    // Hapus lock agar tidak menunggu 10 detik
+    redisRequest_('GET', `/del/${encodeURIComponent(lockKey)}`);
 
     return hasilUjian;
 

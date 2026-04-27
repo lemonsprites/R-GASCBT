@@ -182,6 +182,12 @@
     .btn-reload:hover {
       background-color: #138496;
     }
+
+    .latin-line,
+    .arabic-line,
+    .teks-opsi {
+      white-space: pre-wrap;
+    }
   </style>
 </head>
 
@@ -510,6 +516,10 @@
       function formatMarkdownInline(text) {
         if (!text) return '';
         let html = escapeHtml(text);
+        // Blok kode (multiline)
+        html = html.replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>');
+
+
         html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/__(.*?)__/g, '<strong>$1</strong>');
         html = html.replace(/\*(.*?)\*/g, '<em>$1</em>').replace(/_(.*?)_/g, '<em>$1</em>');
         html = html.replace(/==(.*?)==/g, '<mark class="highlight">$1</mark>');
@@ -731,28 +741,43 @@
       }
 
       function kirimJawaban() {
-        if (statusUjian !== "AKTIF" || isSubmitting) return;
+        // 1. CEK STATUS AWAL (Mencegah Double Click/Spam)
+        if (isSubmitting || statusUjian !== "AKTIF") return;
 
+        const btn = document.getElementById('btn-submit');
+
+        // 2. LOCK UI SEGERA
         isSubmitting = true;
-        statusUjian = "SELESAI";
+        if (btn) {
+          btn.disabled = true;
+          btn.innerText = "Sedang Mengirim...";
+        }
 
+        // 3. HENTIKAN SEMUA TIMER
         if (timerInterval) clearInterval(timerInterval);
         if (retryInterval) clearInterval(retryInterval);
 
-        Swal.fire({ title: 'Mengirim Jawaban...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+        // 4. TAMPILKAN LOADING (Agar user tidak panik/refresh)
+        Swal.fire({
+          title: 'Mengirim Jawaban...',
+          text: 'Mohon tunggu sebentar, jangan tutup halaman ini.',
+          allowOutsideClick: false,
+          didOpen: () => Swal.showLoading()
+        });
 
+        // 5. PARSING JAWABAN (Konversi dari Index ke Teks)
         const jawabanTeks = {};
-        for (let soalId in jawUser) {
-          const optKey = jawUser[soalId];
-          const soal = quest.find(q => q.id === soalId);
-          if (soal && optKey) {
-            const parts = optKey.split('_');
-            const optIndex = parseInt(parts[1]);
+        quest.forEach(soal => {
+          const optKey = jawUser[soal.id]; // misal "opt_2"
+          if (optKey) {
+            const optIndex = parseInt(optKey.split('_')[1]);
             if (soal.opsi && soal.opsi[optIndex]) {
-              jawabanTeks[soalId] = soal.opsi[optIndex].text;
+              jawabanTeks[soal.id] = soal.opsi[optIndex].text;
             }
+          } else {
+            jawabanTeks[soal.id] = ""; // Beri string kosong jika tidak dijawab
           }
-        }
+        });
 
         const payload = {
           token: currentToken,
@@ -766,17 +791,42 @@
           loginVia: currentLoginVia
         };
 
+        // 6. KIRIM KE SERVER
         google.script.run
           .withSuccessHandler(skor => {
-            Swal.fire('Berhasil!', `Ujian Selesai. Skor Anda: ${skor}`, 'success').then(() => {
-              resetAll();
-            });
+            isSubmitting = false; // Reset flag
+            statusUjian = "SELESAI";
+
+            if (skor === 0) {
+              // Jika skor 0, kemungkinan besar user sudah submit sebelumnya (Filter Redis/Sheet)
+              Swal.fire('Info', 'Jawaban sudah pernah terkirim sebelumnya.', 'info').then(() => {
+                resetAll();
+              });
+            } else if (skor === -1) {
+              // Jika server error/timeout lock
+              isSubmitting = false;
+              if (btn) btn.disabled = false;
+              Swal.fire('Gagal', 'Server sedang sibuk. Silakan klik Submit lagi.', 'warning');
+            } else {
+              // Berhasil Final
+              Swal.fire({
+                icon: 'success',
+                title: 'Berhasil!',
+                text: `Ujian Selesai. Skor Anda: ${skor}`,
+                confirmButtonText: 'Keluar'
+              }).then(() => {
+                resetAll();
+              });
+            }
           })
           .withFailureHandler(err => {
+            isSubmitting = false;
+            if (btn) {
+              btn.disabled = false;
+              btn.innerText = "Kirim Ulang";
+            }
             console.error(err);
-            Swal.fire('Error', 'Gagal menyimpan jawaban: ' + err.message, 'error').then(() => {
-              resetAll();
-            });
+            Swal.fire('Gagal Terhubung', 'Koneksi bermasalah. Pastikan internet stabil dan coba lagi.', 'error');
           })
           .simpanKeDatabaseFinal(payload);
       }
