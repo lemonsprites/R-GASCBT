@@ -14,7 +14,7 @@
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
   <style>
-    /* sama seperti sebelumnya, tidak diubah */
+    /* style tidak berubah, sama seperti sebelumnya (tidak ditulis ulang untuk menghemat tempat) */
     :root {
       --primary-color: #0d47a1;
       --accent-color: #ffca28;
@@ -265,32 +265,51 @@
     const REDIS_ENDPOINT = "https://dear-monarch-83839.upstash.io";
     const REDIS_TOKEN = "gQAAAAAAAUd_AAIgcDE2Y2JmMTZhZWU5OGE0MmRkOTI3ZDc5ZTU1ZDYzNDIzZg";
 
-    async function redisRequest(command, key, data = null) {
-      let url, options = { headers: { 'Authorization': `Bearer ${REDIS_TOKEN}` } };
-      if (command === 'HSET_BATCH') {
-        url = `${REDIS_ENDPOINT}/hset/${encodeURIComponent(key)}`;
-        options.method = 'POST';
-        options.headers['Content-Type'] = 'application/json';
-        options.body = JSON.stringify(data);
-      } else if (command === 'HGETALL') {
-        url = `${REDIS_ENDPOINT}/hgetall/${encodeURIComponent(key)}`;
-        options.method = 'GET';
-      } else if (command === 'EXISTS') {
-        url = `${REDIS_ENDPOINT}/exists/${encodeURIComponent(key)}`;
-        options.method = 'GET';
-      } else if (command === 'SETEX') {
-        const [seconds, value] = data;
-        url = `${REDIS_ENDPOINT}/setex/${encodeURIComponent(key)}/${seconds}/${encodeURIComponent(value)}`;
-        options.method = 'GET';
-      } else if (command === 'DEL') {
-        url = `${REDIS_ENDPOINT}/del/${key.split(',').map(k => encodeURIComponent(k)).join('/')}`;
-        options.method = 'GET';
-      } else {
-        throw new Error(`Command ${command} tidak didukung`);
+    // Fungsi umum untuk mengirim perintah Redis via POST body array (sesuai dokumentasi Upstash)
+    async function redisCommand(...args) {
+      const response = await fetch(REDIS_ENDPOINT, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${REDIS_TOKEN}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(args)
+      });
+      const data = await response.json();
+      if (data.error) throw new Error(data.error);
+      return data.result;
+    }
+
+    // Helper untuk HSET batch (menerima object field->value)
+    async function hsetBatch(key, fieldValueMap) {
+      const args = ['HSET', key];
+      for (const [field, value] of Object.entries(fieldValueMap)) {
+        args.push(field, value);
       }
-      const response = await fetch(url, options);
-      const result = await response.json();
-      return result.result;
+      return redisCommand(...args);
+    }
+
+    // Helper untuk HGETALL return object
+    async function hgetall(key) {
+      const arr = await redisCommand('HGETALL', key);
+      const obj = {};
+      for (let i = 0; i < arr.length; i += 2) obj[arr[i]] = arr[i + 1];
+      return obj;
+    }
+
+    // Helper EXISTS
+    async function exists(key) {
+      return await redisCommand('EXISTS', key) === 1;
+    }
+
+    // Helper SETEX
+    async function setex(key, seconds, value) {
+      return await redisCommand('SETEX', key, seconds, value);
+    }
+
+    // Helper DEL multiple keys
+    async function del(...keys) {
+      return await redisCommand('DEL', ...keys);
     }
 
     // ==================== VARIABEL GLOBAL ====================
@@ -302,6 +321,30 @@
     let isSubmitting = false;
     let currentRedisKey = '';
 
+    // --------------------- LOCALSTORAGE BACKUP ---------------------
+    function simpanKeLocalStorage() {
+      if (!currentToken || !currentUsername) return;
+      try {
+        localStorage.setItem(`cbt_local_${currentToken}_${currentUsername}`, JSON.stringify(jawUser));
+      } catch (e) { console.error('Gagal simpan ke localStorage:', e); }
+    }
+
+    function muatDariLocalStorage() {
+      const key = `cbt_local_${currentToken}_${currentUsername}`;
+      const data = localStorage.getItem(key);
+      if (data) {
+        const parsed = JSON.parse(data);
+        Object.assign(jawUser, parsed);
+        console.log(`Memuat ${Object.keys(parsed).length} jawaban dari localStorage`);
+        return true;
+      }
+      return false;
+    }
+
+    function hapusLocalStorage() {
+      localStorage.removeItem(`cbt_local_${currentToken}_${currentUsername}`);
+    }
+
     function setRedisKey(token, username) {
       currentRedisKey = `cbt:${token}:${username}`;
     }
@@ -309,7 +352,10 @@
     async function saveAllJawaban() {
       if (!currentRedisKey || Object.keys(jawUser).length === 0) return;
       try {
-        await redisRequest('HSET_BATCH', currentRedisKey, jawUser);
+        await hsetBatch(currentRedisKey, jawUser);
+        console.log('Jawaban disimpan ke Redis (HSET batch)');
+        // Opsional: hapus localStorage setelah sukses simpan ke Redis (tapi jangan dulu agar cadangan tetap ada)
+        // hapusLocalStorage();
       } catch (e) { console.error('Gagal simpan jawaban batch:', e); }
     }
 
@@ -325,31 +371,29 @@
       if (statusUjian === "AKTIF") saveAllJawaban();
     });
 
-    async function ambilSemuaJawabanRedis(token, username) {
-      const key = `cbt:${token}:${username}`;
-      const result = await redisRequest('HGETALL', key);
-      const jawabanObj = {};
-      for (let i = 0; i < result.length; i += 2) jawabanObj[result[i]] = result[i + 1];
-      return jawabanObj;
+    async function muatJawabanDariRedis() {
+      const jawaban = await hgetall(currentRedisKey);
+      if (Object.keys(jawaban).length > 0) {
+        Object.assign(jawUser, jawaban);
+        hapusLocalStorage(); // data di Redis lebih baru, hapus cadangan lokal
+        console.log('Data dari Redis dimuat');
+      } else {
+        const loaded = muatDariLocalStorage();
+        if (!loaded) console.log('Tidak ada data cadangan');
+      }
     }
 
     async function cekSudahUjianRedis(username, mapel) {
       const key = `done:${mapel}:${username}`;
-      const exists = await redisRequest('EXISTS', key);
-      return exists === 1;
+      return await exists(key);
     }
     async function tandaiSudahUjianRedis(username, mapel) {
       const key = `done:${mapel}:${username}`;
-      await redisRequest('SETEX', key, [86400, '1']);
+      await setex(key, 86400, '1');
     }
     async function hapusDataRedis(token, username) {
       const keyJawaban = `cbt:${token}:${username}`;
-      await redisRequest('DEL', keyJawaban);
-    }
-
-    async function muatJawabanDariRedis() {
-      const jawaban = await ambilSemuaJawabanRedis(currentToken, currentUsername);
-      Object.assign(jawUser, jawaban);
+      await del(keyJawaban);
     }
 
     function hitungSkorLokal(jawabanTeks, kunci) {
@@ -378,17 +422,13 @@
         Swal.fire('Diskualifikasi', 'Anda melanggar 3 kali. Jawaban dikirim otomatis.', 'error').then(() => kirimJawaban());
       }
     }
-
+    
     document.addEventListener('visibilitychange', () => {
-      if (statusUjian === "AKTIF" && document.hidden) catatPelanggaran();
-    });
-    window.addEventListener('blur', () => {
-      if (statusUjian === "AKTIF") {
-        setTimeout(() => {
-          if (statusUjian === "AKTIF" && document.hidden === false && !document.hasFocus()) catatPelanggaran();
-        }, 100);
+      if (statusUjian === "AKTIF" && document.hidden) {
+        catatPelanggaran();
       }
     });
+
     window.addEventListener('beforeunload', (e) => {
       if (statusUjian === "AKTIF" && !isSubmitting) {
         e.preventDefault();
@@ -431,16 +471,11 @@
 
             const sudah = await cekSudahUjianRedis(currentUsername, currentMapel);
             if (sudah) {
-              Swal.fire('Info', 'Anda sudah mengikuti ujian ini!', 'info').then(() => {
-                // Kembalikan ke form login tanpa reload halaman
-                resetAll(); // fungsi resetAll sudah ada, akan membersihkan state dan menampilkan view-login
-              });
+              Swal.fire('Info', 'Anda sudah mengikuti ujian ini!', 'info').then(() => resetAll());
               return;
             }
             if (sisa <= 0) {
-              Swal.fire('Waktu Habis', 'Sesi ujian telah berakhir.', 'error').then(() => {
-                resetAll(); // kembali ke halaman login tanpa reload
-              });
+              Swal.fire('Waktu Habis', 'Sesi ujian telah berakhir.', 'error').then(() => resetAll());
               return;
             }
 
@@ -477,7 +512,7 @@
     }
 
     // ==================== TAMPIL SOAL ====================
-    function showQuest() { /* (sama seperti sebelumnya, tidak diubah) */
+    function showQuest() {
       const s = quest[idx];
       if (!s) return;
       document.getElementById('txt-no').innerHTML = `SOAL NOMOR ${idx + 1}`;
@@ -528,12 +563,20 @@
       return html;
     }
 
+    function escapeHtml(text) {
+      if (!text) return '';
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
     // ==================== PILIH JAWABAN ====================
     function pilih(soalId, optKey) {
       jawUser[soalId] = optKey;
       delete ragu[soalId];
       showQuest();
       showNav();
+      simpanKeLocalStorage(); // langsung backup ke localStorage
     }
 
     function setRagu() {
@@ -559,6 +602,7 @@
       const terjawab = Object.keys(jawUser).length;
       document.getElementById('info-lock').innerHTML = `<i class="bi bi-check-circle"></i> Terjawab: ${terjawab}/${quest.length}`;
     }
+
     function move(n) { if (idx + n >= 0 && idx + n < quest.length) { idx += n; showQuest(); showNav(); } }
     function navigasiKe(tujuan) { idx = tujuan; showQuest(); showNav(); }
 
@@ -608,9 +652,8 @@
     async function kirimJawaban() {
       if (isSubmitting || statusUjian !== "AKTIF") return;
 
-      await saveAllJawaban(); // Simpan semua jawaban ke Redis
+      await saveAllJawaban();
 
-      // Konversi jawaban ke teks untuk dikirim ke server
       const jawabanTeks = {};
       for (let soalId in jawUser) {
         const optKey = jawUser[soalId];
@@ -634,11 +677,11 @@
         loginVia: currentLoginVia
       };
 
-      // Kirim request ke server ASYNC (tidak perlu menunggu)
       google.script.run
         .withSuccessHandler(async (skorServer) => {
           await tandaiSudahUjianRedis(currentUsername, currentMapel);
           await hapusDataRedis(currentToken, currentUsername);
+          hapusLocalStorage();
           resetAll();
         })
         .withFailureHandler(err => {
@@ -647,22 +690,17 @@
         })
         .simpanKeDatabaseFinal(payload);
 
-      // Tandai ujian selesai dan hentikan timer
       isSubmitting = true;
       statusUjian = "SELESAI";
       if (timerInterval) clearInterval(timerInterval);
       if (autoSaveInterval) clearInterval(autoSaveInterval);
 
-      // Tampilkan notifikasi skor instan
       await Swal.fire({
         title: 'Ujian Selesai!',
         html: `Selamat Ujian Selesai. Skor Anda: <strong style="font-size:2rem">${skorLokal}</strong>`,
         icon: 'success',
         confirmButtonText: 'OK'
       });
-
-      // Reset akan dipanggil oleh success/failure handler, tapi jika tidak ada response dalam waktu lama?
-      // Kita tidak perlu resetAll() di sini karena akan duplikat. Biarkan handler yang memanggil.
     }
 
     function resetAll() {
@@ -672,7 +710,7 @@
       isSubmitting = false;
       if (timerInterval) clearInterval(timerInterval);
       if (autoSaveInterval) clearInterval(autoSaveInterval);
-      // if (fullscreenWatchInterval) clearInterval(fullscreenWatchInterval); // opsional
+      hapusLocalStorage();
       document.getElementById('view-exam').classList.add('d-none');
       document.getElementById('wrapper-timer').classList.add('d-none');
       document.getElementById('btn-reload').style.display = 'none';
@@ -683,14 +721,7 @@
       document.getElementById('in-token').value = '';
     }
 
-    function escapeHtml(text) {
-      if (!text) return '';
-      const div = document.createElement('div');
-      div.textContent = text;
-      return div.innerHTML;
-    }
-
-    // ==================== FULLSCREEN (pemaksaan dengan gesture) ====================
+    // ==================== FULLSCREEN ====================
     let fullscreenBypass = false;
     let fullscreenWatchInterval = null;
 
@@ -714,8 +745,6 @@
       if (fullscreenWatchInterval) clearInterval(fullscreenWatchInterval);
       fullscreenWatchInterval = setInterval(() => {
         if (fullscreenBypass) return;
-        const isFullscreen = !!(document.fullscreenElement || document.webkitFullscreenElement);
-        // tidak dipaksa otomatis, hanya monitor
       }, 500);
     }
 
