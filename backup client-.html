@@ -14,7 +14,6 @@
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
   <style>
-    /* style tidak berubah, sama seperti sebelumnya (tidak ditulis ulang untuk menghemat tempat) */
     :root {
       --primary-color: #0d47a1;
       --accent-color: #ffca28;
@@ -224,7 +223,9 @@
         <div class="mb-4"><label class="form-label small fw-bold text-danger">TOKEN</label><input type="text"
             id="in-token" class="form-control form-control-lg text-center fw-bold" placeholder="MASUKKAN TOKEN"></div>
         <button class="btn btn-primary w-100 py-3 fw-bold shadow" onclick="mulaiProses()">MULAI UJIAN</button>
-        <div class='w-100 text-center mt-3'><a href="#">Masuk Admin Panel</a></div>
+        <div class='w-100 text-center mt-3'>
+          <a href="?page=admin">Masuk Admin Panel</a>
+        </div>
       </div>
     </div>
 
@@ -261,11 +262,12 @@
 
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
   <script>
+    let saveDebounceTimer = null;
+
     // ==================== KONFIGURASI REDIS ====================
     const REDIS_ENDPOINT = "https://dear-monarch-83839.upstash.io";
     const REDIS_TOKEN = "gQAAAAAAAUd_AAIgcDE2Y2JmMTZhZWU5OGE0MmRkOTI3ZDc5ZTU1ZDYzNDIzZg";
 
-    // Fungsi umum untuk mengirim perintah Redis via POST body array (sesuai dokumentasi Upstash)
     async function redisCommand(...args) {
       const response = await fetch(REDIS_ENDPOINT, {
         method: 'POST',
@@ -280,16 +282,12 @@
       return data.result;
     }
 
-    // Helper untuk HSET batch (menerima object field->value)
     async function hsetBatch(key, fieldValueMap) {
       const args = ['HSET', key];
-      for (const [field, value] of Object.entries(fieldValueMap)) {
-        args.push(field, value);
-      }
+      for (const [field, value] of Object.entries(fieldValueMap)) args.push(field, value);
       return redisCommand(...args);
     }
 
-    // Helper untuk HGETALL return object
     async function hgetall(key) {
       const arr = await redisCommand('HGETALL', key);
       const obj = {};
@@ -297,20 +295,9 @@
       return obj;
     }
 
-    // Helper EXISTS
-    async function exists(key) {
-      return await redisCommand('EXISTS', key) === 1;
-    }
-
-    // Helper SETEX
-    async function setex(key, seconds, value) {
-      return await redisCommand('SETEX', key, seconds, value);
-    }
-
-    // Helper DEL multiple keys
-    async function del(...keys) {
-      return await redisCommand('DEL', ...keys);
-    }
+    async function exists(key) { return await redisCommand('EXISTS', key) === 1; }
+    async function setex(key, seconds, value) { return await redisCommand('SETEX', key, seconds, value); }
+    async function del(...keys) { return await redisCommand('DEL', ...keys); }
 
     // ==================== VARIABEL GLOBAL ====================
     let quest = [], kunci = {}, jawUser = {}, ragu = {};
@@ -320,6 +307,8 @@
     let timerInterval = null;
     let isSubmitting = false;
     let currentRedisKey = '';
+    let pendingViolationTimer = null;
+    const TOLERANSI_DETIK = 3;
 
     // --------------------- LOCALSTORAGE BACKUP ---------------------
     function simpanKeLocalStorage() {
@@ -333,68 +322,43 @@
       const key = `cbt_local_${currentToken}_${currentUsername}`;
       const data = localStorage.getItem(key);
       if (data) {
-        const parsed = JSON.parse(data);
-        Object.assign(jawUser, parsed);
-        console.log(`Memuat ${Object.keys(parsed).length} jawaban dari localStorage`);
+        Object.assign(jawUser, JSON.parse(data));
         return true;
       }
       return false;
     }
 
-    function hapusLocalStorage() {
-      localStorage.removeItem(`cbt_local_${currentToken}_${currentUsername}`);
-    }
-
-    function setRedisKey(token, username) {
-      currentRedisKey = `cbt:${token}:${username}`;
-    }
+    function hapusLocalStorage() { localStorage.removeItem(`cbt_local_${currentToken}_${currentUsername}`); }
+    function setRedisKey(token, username) { currentRedisKey = `cbt:${token}:${username}`; }
 
     async function saveAllJawaban() {
       if (!currentRedisKey || Object.keys(jawUser).length === 0) return;
-      try {
-        await hsetBatch(currentRedisKey, jawUser);
-        console.log('Jawaban disimpan ke Redis (HSET batch)');
-        // Opsional: hapus localStorage setelah sukses simpan ke Redis (tapi jangan dulu agar cadangan tetap ada)
-        // hapusLocalStorage();
-      } catch (e) { console.error('Gagal simpan jawaban batch:', e); }
+      try { await hsetBatch(currentRedisKey, jawUser); } catch (e) { console.error('Gagal simpan jawaban batch:', e); }
     }
 
     let autoSaveInterval = null;
+
     function startAutoSave() {
       if (autoSaveInterval) clearInterval(autoSaveInterval);
+      // 10 menit = 600000 ms (bukan 600000/60)
       autoSaveInterval = setInterval(() => {
         if (statusUjian === "AKTIF") saveAllJawaban();
-      }, 600000); // 10 menit
+      }, 600000);
     }
 
-    window.addEventListener('beforeunload', () => {
-      if (statusUjian === "AKTIF") saveAllJawaban();
-    });
+    window.addEventListener('beforeunload', () => { if (statusUjian === "AKTIF") saveAllJawaban(); });
 
     async function muatJawabanDariRedis() {
       const jawaban = await hgetall(currentRedisKey);
       if (Object.keys(jawaban).length > 0) {
         Object.assign(jawUser, jawaban);
-        hapusLocalStorage(); // data di Redis lebih baru, hapus cadangan lokal
-        console.log('Data dari Redis dimuat');
-      } else {
-        const loaded = muatDariLocalStorage();
-        if (!loaded) console.log('Tidak ada data cadangan');
-      }
+        hapusLocalStorage();
+      } else { muatDariLocalStorage(); }
     }
 
-    async function cekSudahUjianRedis(username, mapel) {
-      const key = `done:${mapel}:${username}`;
-      return await exists(key);
-    }
-    async function tandaiSudahUjianRedis(username, mapel) {
-      const key = `done:${mapel}:${username}`;
-      await setex(key, 86400, '1');
-    }
-    async function hapusDataRedis(token, username) {
-      const keyJawaban = `cbt:${token}:${username}`;
-      await del(keyJawaban);
-    }
+    async function cekSudahUjianRedis(username, mapel) { return await exists(`done:${mapel}:${username}`); }
+    async function tandaiSudahUjianRedis(username, mapel) { await setex(`done:${mapel}:${username}`, 86400, '1'); }
+    async function hapusDataRedis(token, username) { await del(`cbt:${token}:${username}`); }
 
     function hitungSkorLokal(jawabanTeks, kunci) {
       let benar = 0;
@@ -412,28 +376,38 @@
       return total > 0 ? Math.round((benar / total) * 100) : 0;
     }
 
-    // ==================== DETEKSI PINDAH TAB ====================
+    function hitungPersentaseJawaban() {
+      if (!quest.length) return 0;
+      return (Object.keys(jawUser).length / quest.length) * 100;
+    }
+
     function catatPelanggaran() {
       if (statusUjian !== "AKTIF") return;
       pelanggaran++;
-      if (pelanggaran === 1) Swal.fire('Peringatan 1', 'Jangan pindah tab atau membuka aplikasi lain!', 'warning');
-      else if (pelanggaran === 2) Swal.fire('Peringatan 2', 'Sekali lagi melanggar, ujian akan otomatis dikirim!', 'error');
-      else if (pelanggaran >= 3) {
-        Swal.fire('Diskualifikasi', 'Anda melanggar 3 kali. Jawaban dikirim otomatis.', 'error').then(() => kirimJawaban());
+      const persen = hitungPersentaseJawaban();
+      const autoKirim = (persen >= 75 && pelanggaran >= 3);
+
+      if (pelanggaran === 1) {
+        Swal.fire('Peringatan 1', 'Jangan pindah tab atau biarkan layar mati terlalu lama!', 'warning');
+      } else if (pelanggaran === 2) {
+        Swal.fire('Peringatan 2', 'Segera kembali ke ujian. Jika sekali lagi, akan dikirim otomatis (jika sudah menjawab ≥75%).', 'error');
+      } else if (pelanggaran >= 3) {
+        if (autoKirim) {
+          Swal.fire('Peringatan', `Anda telah meninggalkan ujian terlalu lama (${pelanggaran} kali) dan sudah menjawab ${Math.floor(persen)}% soal. Jawaban akan dikirim otomatis.`, 'error')
+            .then(() => kirimJawaban());
+        } else {
+          Swal.fire('Peringatan', `Anda telah meninggalkan ujian (${pelanggaran} kali). Belum bisa dikirim otomatis karena jawaban baru ${Math.floor(persen)}% (<75%). Segera kerjakan!`, 'error');
+        }
       }
     }
-    
-    document.addEventListener('visibilitychange', () => {
-      if (statusUjian === "AKTIF" && document.hidden) {
-        catatPelanggaran();
-      }
-    });
 
-    window.addEventListener('beforeunload', (e) => {
-      if (statusUjian === "AKTIF" && !isSubmitting) {
-        e.preventDefault();
-        e.returnValue = 'Ujian sedang berlangsung. Yakin ingin meninggalkan halaman?';
-        return e.returnValue;
+    document.addEventListener('visibilitychange', () => {
+      if (statusUjian !== "AKTIF") return;
+      if (document.hidden) {
+        if (pendingViolationTimer !== null) clearTimeout(pendingViolationTimer);
+        pendingViolationTimer = setTimeout(() => { catatPelanggaran(); pendingViolationTimer = null; }, TOLERANSI_DETIK * 1000);
+      } else {
+        if (pendingViolationTimer !== null) { clearTimeout(pendingViolationTimer); pendingViolationTimer = null; }
       }
     });
 
@@ -441,71 +415,99 @@
       if (!currentToken || !currentUsername) return Swal.fire('Info', 'Data session tidak lengkap', 'info');
       Swal.fire({ title: 'Memuat ulang jawaban...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
       await muatJawabanDariRedis();
-      showQuest();
-      showNav();
+      showQuest(); showNav();
       Swal.fire('Sukses', `Berhasil memuat ${Object.keys(jawUser).length} jawaban tersimpan`, 'success', 1500);
     }
 
+    // ==================== FULLSCREEN (RAMAH MOBILE) ====================
+    let fullscreenBypass = false;
+    let alreadyWarnedExit = false;
+
+    function enterFullscreen() {
+      const docEl = document.documentElement;
+      if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+        try { docEl.requestFullscreen?.() || docEl.webkitRequestFullscreen?.() || docEl.msRequestFullscreen?.(); } catch (err) { console.warn(err); }
+      }
+    }
+
+    function exitFullscreen() {
+      const exit = document.exitFullscreen || document.webkitExitFullscreen || document.msExitFullscreen;
+      if (exit) exit.call(document);
+    }
+
+    function onFullscreenChange() {
+      const isFullscreen = !!(document.fullscreenElement || document.webkitFullscreenElement);
+      if (!isFullscreen && !fullscreenBypass && statusUjian === "AKTIF" && !alreadyWarnedExit) {
+        alreadyWarnedExit = true;
+        Swal.fire({ icon: 'warning', title: 'Mode layar penuh keluar', text: 'Ujian tetap berjalan, namun pengawas akan mencatat.', toast: true, position: 'top-end', showConfirmButton: false, timer: 3000, timerProgressBar: true });
+        setTimeout(() => { alreadyWarnedExit = false; }, 60000);
+      }
+    }
+
+    document.addEventListener('fullscreenchange', onFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', onFullscreenChange);
+
+    window.addEventListener('load', () => {
+      Swal.fire({ icon: 'info', title: 'Tips Ujian', text: 'Gunakan mode layar penuh untuk kenyamanan. Fullscreen akan aktif saat ujian dimulai.', toast: true, position: 'top-end', showConfirmButton: false, timer: 4000, timerProgressBar: true });
+    });
+
+    window.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' || e.key === 'Esc' || e.keyCode === 27) { e.preventDefault(); e.stopImmediatePropagation(); return false; }
+      if (e.ctrlKey && e.code === 'Space') {
+        e.preventDefault();
+        fullscreenBypass = true;
+        exitFullscreen();
+        if (statusUjian === "AKTIF") Swal.fire('Admin Bypass', 'Anda keluar dari mode layar penuh. Ujian tetap berjalan.', 'info');
+        setTimeout(() => { fullscreenBypass = false; }, 10000);
+      }
+    });
+
     // ==================== LOGIN ====================
-    function mulaiProses() {
+    async function mulaiProses() {
       const userInput = document.getElementById('in-user').value;
       const k = document.getElementById('in-kelas').value;
       const t = document.getElementById('in-token').value;
       if (!userInput || !k || !t) return Swal.fire('Error', 'Lengkapi semua field!', 'error');
-      currentToken = t;
-      currentKelas = k;
+      currentToken = t; currentKelas = k;
       setRedisKey(currentToken, '');
       Swal.fire({ title: 'Menyiapkan Soal...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
       google.script.run
         .withSuccessHandler(async (res) => {
           if (res.status === "success") {
-            quest = res.soal;
-            kunci = res.kunci;
-            currentMapel = res.mapel;
-            currentUsername = res.username;
-            currentNama = res.namaSiswa;
-            currentLoginVia = res.loginVia;
-            sisa = res.sisaWaktuServer;
+            quest = res.soal; kunci = res.kunci; currentMapel = res.mapel; currentUsername = res.username;
+            currentNama = res.namaSiswa; currentLoginVia = res.loginVia; sisa = res.sisaWaktuServer;
             jawUser = {};
             setRedisKey(currentToken, currentUsername);
 
             const sudah = await cekSudahUjianRedis(currentUsername, currentMapel);
-            if (sudah) {
-              Swal.fire('Info', 'Anda sudah mengikuti ujian ini!', 'info').then(() => resetAll());
-              return;
-            }
-            if (sisa <= 0) {
-              Swal.fire('Waktu Habis', 'Sesi ujian telah berakhir.', 'error').then(() => resetAll());
-              return;
-            }
+            if (sudah) { Swal.fire('Info', 'Anda sudah mengikuti ujian ini!', 'info').then(() => resetAll()); return; }
+            if (sisa <= 0) { Swal.fire('Waktu Habis', 'Sesi ujian telah berakhir.', 'error').then(() => resetAll()); return; }
 
             await muatJawabanDariRedis();
 
             Swal.fire({
-              title: 'Login Berhasil!',
-              html: `Selamat mengerjakan, <strong>${res.namaSiswa}</strong>!<br><span style="color:green">Jawaban dipulihkan: ${Object.keys(jawUser).length} soal</span>`,
+              title: `Selamat datang, ${res.namaSiswa}!`,
+              html: `Anda akan mengerjakan <strong>${res.mapel}</strong>.<br>Waktu tersisa: ${Math.floor(sisa / 60)} menit.<br><span style="color:green">Jawaban dipulihkan: ${Object.keys(jawUser).length} soal</span>`,
               icon: 'success',
               confirmButtonText: `${Object.keys(jawUser).length > 0 ? 'Lanjutkan' : 'Mulai'} Ujian Sekarang`,
               allowOutsideClick: false
-            }).then((result) => {
-              if (result.isConfirmed) {
-                enterFullscreen();
-                statusUjian = "AKTIF";
-                document.getElementById('view-login').classList.add('d-none');
-                document.getElementById('view-exam').classList.remove('d-none');
-                document.getElementById('wrapper-timer').classList.remove('d-none');
-                document.getElementById('txt-mapel').innerText = res.mapel;
-                document.getElementById('btn-reload').style.display = 'block';
-                idx = 0;
-                showQuest();
-                showNav();
-                startTimer();
-                startAutoSave();
-              }
+            }).then(() => {
+              enterFullscreen();
+              statusUjian = "AKTIF";
+              const activeKey = `active:${currentToken}:${currentUsername}`;
+              setex(activeKey, sisa + 300, '1');
+
+              document.getElementById('view-login').classList.add('d-none');
+              document.getElementById('view-exam').classList.remove('d-none');
+              document.getElementById('wrapper-timer').classList.remove('d-none');
+              document.getElementById('txt-mapel').innerText = res.mapel;
+              document.getElementById('btn-reload').style.display = 'block';
+              idx = 0;
+              showQuest(); showNav();
+              startTimer();
+              startAutoSave();
             });
-          } else {
-            Swal.fire('Gagal', res.pesan, 'error');
-          }
+          } else { Swal.fire('Gagal', res.pesan, 'error'); }
         })
         .withFailureHandler(err => Swal.fire('Error', 'Koneksi bermasalah: ' + err.message, 'error'))
         .cekLogin(t, userInput, k);
@@ -513,14 +515,12 @@
 
     // ==================== TAMPIL SOAL ====================
     function showQuest() {
-      const s = quest[idx];
-      if (!s) return;
+      const s = quest[idx]; if (!s) return;
       document.getElementById('txt-no').innerHTML = `SOAL NOMOR ${idx + 1}`;
       const lines = s.pertanyaan.split(/\r?\n/);
       let pertanyaanHtml = '';
       lines.forEach(line => {
-        line = line.trim();
-        if (line === '') return;
+        line = line.trim(); if (line === '') return;
         const hasArabic = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/.test(line);
         const dir = hasArabic ? 'rtl' : 'ltr';
         const className = hasArabic ? 'arabic-line' : 'latin-line';
@@ -531,22 +531,19 @@
       if (s.opsi && s.opsi.length > 0) {
         s.opsi.forEach((opsi, optIndex) => {
           const optKey = `${s.id}_${optIndex}`;
-          const jawabanTersimpan = jawUser[s.id];
-          const isSelected = String(jawabanTersimpan) === String(optKey);
+          const isSelected = String(jawUser[s.id]) === String(optKey);
           const optionLetter = String.fromCharCode(65 + optIndex);
           const hasArabicOpt = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/.test(opsi.text);
           const optDir = hasArabicOpt ? 'rtl' : 'ltr';
           const optClass = hasArabicOpt ? 'rtl-opt' : '';
           html += `<div class="opt-box ${isSelected ? 'opt-selected' : ''} ${optClass}" onclick="pilih('${s.id}', '${optKey}')" dir="${optDir}">
-            <div class="opsi-badge">${optionLetter}.</div>`;
+          <div class="opsi-badge">${optionLetter}.</div>`;
           if (opsi.imageUrl) html += `<img src="${opsi.imageUrl}" class="gambar-opsi" onerror="this.style.display='none'" alt="Gambar opsi">`;
           html += `<div class="teks-opsi">${formatMarkdownInline(opsi.text || `Pilihan ${optionLetter}`)}</div>`;
           if (isSelected) html += `<i class="bi bi-check-circle-fill text-primary fs-5"></i>`;
           html += `</div>`;
         });
-      } else {
-        html += '<p class="text-muted">Tidak ada opsi jawaban</p>';
-      }
+      } else { html += '<p class="text-muted">Tidak ada opsi jawaban</p>'; }
       document.getElementById('area-soal').innerHTML = html;
     }
 
@@ -557,36 +554,44 @@
       html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/__(.*?)__/g, '<strong>$1</strong>');
       html = html.replace(/\*(.*?)\*/g, '<em>$1</em>').replace(/_(.*?)_/g, '<em>$1</em>');
       html = html.replace(/==(.*?)==/g, '<mark class="highlight">$1</mark>');
-      html = html.replace(/~~(.*?)~~/g, '<del>$1</del>');
-      html = html.replace(/\+\+(.*?)\+\+/g, '<u>$1</u>');
+      html = html.replace(/~~(.*?)~~/g, '<del>$1</del>').replace(/\+\+(.*?)\+\+/g, '<u>$1</u>');
       html = html.replace(/`(.*?)`/g, '<code>$1</code>');
       return html;
     }
 
-    function escapeHtml(text) {
-      if (!text) return '';
-      const div = document.createElement('div');
-      div.textContent = text;
-      return div.innerHTML;
-    }
+    function escapeHtml(text) { const div = document.createElement('div'); div.textContent = text; return div.innerHTML; }
 
-    // ==================== PILIH JAWABAN ====================
     function pilih(soalId, optKey) {
       jawUser[soalId] = optKey;
       delete ragu[soalId];
       showQuest();
       showNav();
-      simpanKeLocalStorage(); // langsung backup ke localStorage
+      simpanKeLocalStorage();
+      // Debounce DINONAKTIFKAN (sesuai keinginan Anda)
+      // if (saveDebounceTimer) clearTimeout(saveDebounceTimer);
+      // saveDebounceTimer = setTimeout(() => {
+      //   saveAllJawaban().catch(e => console.error('Gagal simpan ke Redis:', e));
+      //   saveDebounceTimer = null;
+      // }, 3000);
+    }
+
+    // Hanya SATU fungsi move (tanpa duplikasi)
+    function move(n) {
+      if (idx + n >= 0 && idx + n < quest.length) {
+        idx += n;
+        showQuest();
+        showNav();
+        // Jika ingin menyimpan saat pindah halaman, aktifkan baris di bawah (opsional)
+        // if (saveDebounceTimer) clearTimeout(saveDebounceTimer);
+        // saveAllJawaban().catch(e => console.error('Gagal simpan ke Redis:', e));
+      }
     }
 
     function setRagu() {
-      const currentSoal = quest[idx];
-      if (!currentSoal) return;
-      const id = currentSoal.id;
-      if (!jawUser[id]) return Swal.fire('Info', 'Pilih jawaban dulu sebelum memberi tanda ragu-ragu', 'info');
-      ragu[id] = !ragu[id];
-      showNav();
-      Swal.fire('Info', `Soal ${idx + 1} ${ragu[id] ? 'ditandai ragu-ragu' : 'tidak ragu lagi'}`, 'info', 1000);
+      const s = quest[idx]; if (!s) return;
+      if (!jawUser[s.id]) return Swal.fire('Info', 'Pilih jawaban dulu sebelum memberi tanda ragu-ragu', 'info');
+      ragu[s.id] = !ragu[s.id]; showNav();
+      Swal.fire('Info', `Soal ${idx + 1} ${ragu[s.id] ? 'ditandai ragu-ragu' : 'tidak ragu lagi'}`, 'info', 1000);
     }
 
     function showNav() {
@@ -599,11 +604,9 @@
         h += `<button class="btn btn-nomor ${cls} ${act}" onclick="navigasiKe(${i})">${i + 1}</button>`;
       });
       document.getElementById('area-nav').innerHTML = h;
-      const terjawab = Object.keys(jawUser).length;
-      document.getElementById('info-lock').innerHTML = `<i class="bi bi-check-circle"></i> Terjawab: ${terjawab}/${quest.length}`;
+      document.getElementById('info-lock').innerHTML = `<i class="bi bi-check-circle"></i> Terjawab: ${Object.keys(jawUser).length}/${quest.length}`;
     }
 
-    function move(n) { if (idx + n >= 0 && idx + n < quest.length) { idx += n; showQuest(); showNav(); } }
     function navigasiKe(tujuan) { idx = tujuan; showQuest(); showNav(); }
 
     function startTimer() {
@@ -639,21 +642,12 @@
       if (raguCount > 0) return Swal.fire('Peringatan', `Masih ada ${raguCount} soal ditandai ragu!`, 'warning');
       const belumTerjawab = quest.filter(s => !jawUser[s.id]).length;
       if (belumTerjawab > 0) return Swal.fire('Peringatan', `Masih ada ${belumTerjawab} soal belum dijawab!`, 'warning');
-      Swal.fire({
-        title: 'Akhiri Ujian?',
-        text: "Jawaban tidak bisa diubah setelah dikirim.",
-        icon: 'question',
-        showCancelButton: true,
-        confirmButtonText: 'Ya, Kirim!',
-        cancelButtonText: 'Batal'
-      }).then(res => { if (res.isConfirmed) kirimJawaban(); });
+      Swal.fire({ title: 'Akhiri Ujian?', text: "Jawaban tidak bisa diubah setelah dikirim.", icon: 'question', showCancelButton: true, confirmButtonText: 'Ya, Kirim!', cancelButtonText: 'Batal' }).then(res => { if (res.isConfirmed) kirimJawaban(); });
     }
 
     async function kirimJawaban() {
       if (isSubmitting || statusUjian !== "AKTIF") return;
-
       await saveAllJawaban();
-
       const jawabanTeks = {};
       for (let soalId in jawUser) {
         const optKey = jawUser[soalId];
@@ -664,43 +658,20 @@
         } else jawabanTeks[soalId] = "";
       }
       const skorLokal = hitungSkorLokal(jawabanTeks, kunci);
-
-      const payload = {
-        token: currentToken,
-        nama: currentNama,
-        kelas: currentKelas,
-        mapel: currentMapel,
-        jawaban: jawabanTeks,
-        kunci: kunci,
-        pelanggaran: pelanggaran,
-        username: currentUsername,
-        loginVia: currentLoginVia
-      };
-
+      const payload = { token: currentToken, nama: currentNama, kelas: currentKelas, mapel: currentMapel, jawaban: jawabanTeks, kunci: kunci, pelanggaran: pelanggaran, username: currentUsername, loginVia: currentLoginVia };
       google.script.run
-        .withSuccessHandler(async (skorServer) => {
+        .withSuccessHandler(async () => {
           await tandaiSudahUjianRedis(currentUsername, currentMapel);
-          await hapusDataRedis(currentToken, currentUsername);
           hapusLocalStorage();
+          del(`active:${currentToken}:${currentUsername}`);
           resetAll();
         })
-        .withFailureHandler(err => {
-          console.error('Gagal simpan ke server:', err);
-          Swal.fire('Peringatan', 'Gagal menyimpan jawaban ke server. Hubungi pengawas!', 'error').then(() => resetAll());
-        })
+        .withFailureHandler(err => { console.error(err); Swal.fire('Peringatan', 'Gagal menyimpan jawaban ke server. Hubungi pengawas!', 'error').then(() => resetAll()); })
         .simpanKeDatabaseFinal(payload);
-
-      isSubmitting = true;
-      statusUjian = "SELESAI";
+      isSubmitting = true; statusUjian = "SELESAI";
       if (timerInterval) clearInterval(timerInterval);
       if (autoSaveInterval) clearInterval(autoSaveInterval);
-
-      await Swal.fire({
-        title: 'Ujian Selesai!',
-        html: `Selamat Ujian Selesai. Skor Anda: <strong style="font-size:2rem">${skorLokal}</strong>`,
-        icon: 'success',
-        confirmButtonText: 'OK'
-      });
+      await Swal.fire({ title: 'Ujian Selesai!', html: `Selamat Ujian Selesai. Skor Anda: <strong style="font-size:2rem">${skorLokal}</strong>`, icon: 'success', confirmButtonText: 'OK' });
     }
 
     function resetAll() {
@@ -710,6 +681,9 @@
       isSubmitting = false;
       if (timerInterval) clearInterval(timerInterval);
       if (autoSaveInterval) clearInterval(autoSaveInterval);
+      if (currentToken && currentUsername) {
+        redisCommand('DEL', `active:${currentToken}:${currentUsername}`).catch(() => { });
+      }
       hapusLocalStorage();
       document.getElementById('view-exam').classList.add('d-none');
       document.getElementById('wrapper-timer').classList.add('d-none');
@@ -720,91 +694,6 @@
       document.getElementById('in-kelas').selectedIndex = 0;
       document.getElementById('in-token').value = '';
     }
-
-    // ==================== FULLSCREEN ====================
-    let fullscreenBypass = false;
-    let fullscreenWatchInterval = null;
-
-    function enterFullscreen() {
-      const docEl = document.documentElement;
-      if (!document.fullscreenElement && !document.webkitFullscreenElement) {
-        try {
-          if (docEl.requestFullscreen) docEl.requestFullscreen();
-          else if (docEl.webkitRequestFullscreen) docEl.webkitRequestFullscreen();
-          else if (docEl.msRequestFullscreen) docEl.msRequestFullscreen();
-        } catch (err) { console.warn(err); }
-      }
-    }
-
-    function exitFullscreen() {
-      const exit = document.exitFullscreen || document.webkitExitFullscreen || document.msExitFullscreen;
-      if (exit) exit.call(document);
-    }
-
-    function startFullscreenWatch() {
-      if (fullscreenWatchInterval) clearInterval(fullscreenWatchInterval);
-      fullscreenWatchInterval = setInterval(() => {
-        if (fullscreenBypass) return;
-      }, 500);
-    }
-
-    function handleFullscreenExit() {
-      if (fullscreenBypass) return;
-      Swal.fire({
-        icon: 'warning',
-        title: 'Mode layar penuh diperlukan',
-        text: 'Klik di mana saja untuk kembali ke mode layar penuh.',
-        toast: true,
-        position: 'top-end',
-        showConfirmButton: false,
-        timer: 3000
-      });
-      const once = () => {
-        enterFullscreen();
-        document.body.removeEventListener('click', once);
-      };
-      document.body.addEventListener('click', once, { once: true });
-    }
-
-    document.addEventListener('fullscreenchange', () => {
-      const isFullscreen = !!(document.fullscreenElement || document.webkitFullscreenElement);
-      if (!isFullscreen && !fullscreenBypass) handleFullscreenExit();
-    });
-    document.addEventListener('webkitfullscreenchange', () => {
-      const isFullscreen = !!(document.fullscreenElement || document.webkitFullscreenElement);
-      if (!isFullscreen && !fullscreenBypass) handleFullscreenExit();
-    });
-
-    window.addEventListener('load', () => {
-      Swal.fire({
-        title: 'Mode Layar Penuh',
-        text: 'Klik tombol di bawah untuk memulai ujian dalam mode layar penuh.',
-        icon: 'info',
-        confirmButtonText: 'Masuk Layar Penuh',
-        allowOutsideClick: false
-      }).then(() => {
-        enterFullscreen();
-        startFullscreenWatch();
-        Swal.fire('Sukses', 'Mode layar penuh aktif. Silakan login.', 'success');
-      });
-    });
-
-    window.addEventListener('keydown', function (e) {
-      if (e.key === 'Escape' || e.key === 'Esc' || e.keyCode === 27) {
-        e.preventDefault();
-        e.stopImmediatePropagation();
-        return false;
-      }
-      if (e.ctrlKey && e.code === 'Space') {
-        e.preventDefault();
-        fullscreenBypass = true;
-        exitFullscreen();
-        if (statusUjian === "AKTIF") {
-          Swal.fire('Admin Bypass', 'Anda keluar dari mode layar penuh. Ujian tetap berjalan.', 'info');
-        }
-        setTimeout(() => { fullscreenBypass = false; }, 10000);
-      }
-    });
   </script>
 </body>
 

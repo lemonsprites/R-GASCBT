@@ -7,7 +7,6 @@ function getRedisConfig_() {
     token: PropertiesService.getScriptProperties().getProperty('REDIS_TOKEN')
   };
 }
-
 function redisRequest_(method, path, body = null) {
   const cfg = getRedisConfig_();
   if (!cfg.endpoint || !cfg.token) throw new Error("Redis tidak dikonfigurasi");
@@ -64,7 +63,7 @@ function getSoalDanKunci(url) {
     const cacheResp = redisRequest_('GET', `/get/${encodeURIComponent(redisKey)}`);
     const cacheData = JSON.parse(cacheResp.getContentText());
     if (cacheData && cacheData.result) return JSON.parse(cacheData.result);
-    
+
     const lockKey = `${redisKey}:lock`;
     const lockPath = `/set/${encodeURIComponent(lockKey)}/LOCKED?nx=true&ex=10`;
     const lockResp = JSON.parse(redisRequest_('GET', lockPath).getContentText());
@@ -74,7 +73,7 @@ function getSoalDanKunci(url) {
       const retryData = JSON.parse(retryResp.getContentText());
       if (retryData && retryData.result) return JSON.parse(retryData.result);
     }
-    
+
     const form = FormApp.openByUrl(url);
     const items = form.getItems();
     let soal = [], kunci = {};
@@ -213,24 +212,21 @@ function cekLogin(tokenUser, inputUser, kelasUser) {
 // ==================== SIMPAN FINAL KE SHEET ====================
 function simpanKeDatabaseFinal(payload) {
   const sheetPermanen = SS.getSheetByName(SHEET_PERMANEN) || SS.insertSheet(SHEET_PERMANEN);
-  // Cek duplikat ringkas (tanpa lock)
+
   const lastRow = sheetPermanen.getLastRow();
-  let sudah = false;
   if (lastRow > 0) {
-    const range = sheetPermanen.getRange(1, 9, lastRow, 1); // kolom I (username)
+    const range = sheetPermanen.getRange(1, 8, lastRow, 1); // kolom H (username)
     const usernames = range.getValues().flat();
-    sudah = usernames.includes(payload.username);
+    if (usernames.includes(payload.username)) return 0;
   }
-  if (sudah) return 0;
 
   const lock = LockService.getScriptLock();
   try {
     lock.waitLock(30000);
-    // Cek ulang setelah lock
     const existingData = sheetPermanen.getDataRange().getValues();
-    const isAlreadySubmitted = existingData.some(row => (row[8] || '') === payload.username && row[3] === payload.mapel);
+    const isAlreadySubmitted = existingData.some(row => (row[7] || '') === payload.username && row[3] === payload.mapel);
     if (isAlreadySubmitted) return 0;
-    
+
     let skorBenar = 0;
     const totalSoal = Object.keys(payload.kunci).length;
     for (let id in payload.kunci) {
@@ -243,29 +239,12 @@ function simpanKeDatabaseFinal(payload) {
       }
     }
     const skorFinal = totalSoal > 0 ? Math.round((skorBenar / totalSoal) * 100) : 0;
+
     sheetPermanen.appendRow([
       new Date(), payload.nama, payload.kelas, payload.mapel, skorFinal,
       JSON.stringify(payload.jawaban), payload.pelanggaran, payload.username, payload.loginVia
     ]);
-
-    // Backup ke Redis (opsional, TTL 1 tahun)
-    const finalKey = `FINAL:${payload.mapel}:${payload.username}`;
-    const finalData = {
-      timestamp: new Date().toISOString(),
-      nama: payload.nama,
-      kelas: payload.kelas,
-      mapel: payload.mapel,
-      skor: skorFinal,
-      jawaban: payload.jawaban,
-      pelanggaran: payload.pelanggaran,
-      loginVia: payload.loginVia,
-      token: payload.token,
-      username: payload.username
-    };
-    try {
-      redisRequest_('POST', `/set/${encodeURIComponent(finalKey)}?ex=31536000`, JSON.stringify(finalData));
-    } catch(e) { console.error('Gagal backup Redis:', e); }
-
+    // Hapus backup ke Redis
     return skorFinal;
   } catch (e) {
     console.error('simpanKeDatabaseFinal error:', e);
@@ -275,8 +254,201 @@ function simpanKeDatabaseFinal(payload) {
   }
 }
 
+// ==================== FUNGSI ADMIN ====================
+
+
+function adminLogin(password) {
+  const adminPass = PropertiesService.getScriptProperties().getProperty('ADMIN_PASSWORD');
+  // Fallback sementara jika properti belum diset (hapus setelah diset)
+  const validPass = adminPass || 'admin123';
+  return { success: password === validPass };
+}
+
+function getStats() {
+  const sheet = SS.getSheetByName('Jawaban');
+  if (!sheet) return { totalSelesai: 0, totalSiswaAktif: 0, perMapel: {} };
+  const data = sheet.getDataRange().getValues();
+  if (data.length <= 1) return { totalSelesai: 0, totalSiswaAktif: 0, perMapel: {} };
+  const rows = data.slice(1);
+  const perMapel = {};
+  rows.forEach(row => {
+    const mapel = row[3];
+    perMapel[mapel] = (perMapel[mapel] || 0) + 1;
+  });
+  // totalSiswaAktif bisa diestimasikan nanti dari Redis atau biarkan 0
+  return { totalSelesai: rows.length, totalSiswaAktif: 0, perMapel };
+}
+
+function getDataPermanen(limit, offset) {
+  const sheet = SS.getSheetByName('Jawaban');
+  if (!sheet) return { headers: [], data: [] };
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0] || [];
+  const start = 1 + offset;
+  const end = start + limit;
+  const rows = data.slice(start, end);
+  return { headers, data: rows };
+}
+
+function adminLoginWithToken(password) {
+  const adminPass = PropertiesService.getScriptProperties().getProperty('ADMIN_PASSWORD');
+  const validPass = adminPass || 'admin123';
+  if (password !== validPass) {
+    console.warn('Admin login gagal: password salah');
+    return { success: false, error: 'Password salah' };
+  }
+
+  const cfg = getRedisConfig_();
+  if (!cfg.endpoint || !cfg.token) {
+    console.error('Redis tidak dikonfigurasi (endpoint/token kosong)');
+    return { success: false, error: 'Redis tidak dikonfigurasi' };
+  }
+
+  console.log('Admin login sukses, mengirim konfigurasi Redis');
+  return {
+    success: true,
+    redisEndpoint: cfg.endpoint,
+    redisToken: cfg.token
+  };
+}
+
+// Reset siswa hanya dari sheet (Redis dihapus oleh client)
+function resetSiswaSheetOnly(username, mapel) {
+  const sheet = SS.getSheetByName('Jawaban');
+  if (!sheet) return false;
+  const data = sheet.getDataRange().getValues();
+  for (let i = data.length - 1; i >= 1; i--) {
+    if (data[i][7] === username && data[i][3] === mapel) {
+      sheet.deleteRow(i + 1);
+    }
+  }
+  return true;
+}
+
+function adminForceSubmit(token, username) {
+  // Cari jadwal berdasarkan token
+  const dataJadwal = getDataJadwal();
+  let jadwal = null;
+  for (let i = 1; i < dataJadwal.length; i++) {
+    if (String(dataJadwal[i][4]).trim() === token) {
+      jadwal = dataJadwal[i];
+      break;
+    }
+  }
+  if (!jadwal) return { success: false, error: "Token tidak valid" };
+
+  const mapel = jadwal[0];
+  const linkForm = jadwal[5];
+
+  // Ambil soal dan kunci dari cache
+  const { soal, kunci } = getSoalDanKunci(linkForm);
+  if (!kunci || Object.keys(kunci).length === 0) return { success: false, error: "Gagal mengambil kunci jawaban" };
+
+  // Ambil jawaban dari Redis menggunakan redisCmd_
+  const redisKey = `cbt:${token}:${username}`;
+  let jawabanRaw = {};
+  try {
+    const result = redisCmd_('HGETALL', redisKey);
+    if (!result || result.length === 0) return { success: false, error: "Tidak ada jawaban tersimpan" };
+    // Konversi array flat menjadi object
+    for (let i = 0; i < result.length; i += 2) {
+      jawabanRaw[result[i]] = result[i + 1];
+    }
+  } catch (e) {
+    return { success: false, error: "Gagal membaca Redis: " + e.message };
+  }
+
+  // Konversi optKey ke teks jawaban (seperti di client)
+  const jawabanTeks = {};
+  for (let id in jawabanRaw) {
+    const optKey = jawabanRaw[id];
+    const soalItem = soal.find(s => String(s.id) === String(id));
+    if (soalItem && optKey) {
+      const idx = parseInt(optKey.split('_')[1]);
+      if (soalItem.opsi && soalItem.opsi[idx]) {
+        jawabanTeks[id] = soalItem.opsi[idx].text;
+      } else {
+        jawabanTeks[id] = optKey;
+      }
+    } else {
+      jawabanTeks[id] = optKey;
+    }
+  }
+
+  // Hitung skor
+  let benar = 0;
+  const total = Object.keys(kunci).length;
+  for (let id in kunci) {
+    const userJawab = jawabanTeks[id] || "";
+    const kunciJawab = kunci[id];
+    if (Array.isArray(kunciJawab)) {
+      const userArr = Array.isArray(userJawab) ? userJawab : [userJawab];
+      if (userArr.sort().join() === kunciJawab.sort().join()) benar++;
+    } else {
+      if (userJawab === kunciJawab) benar++;
+    }
+  }
+  const skor = total > 0 ? Math.round((benar / total) * 100) : 0;
+
+  // Simpan ke sheet permanen
+  const sheet = SS.getSheetByName(SHEET_PERMANEN);
+  if (!sheet) return { success: false, error: "Sheet Jawaban tidak ditemukan" };
+  const dataSiswa = getDataSiswa();
+  let nama = username;
+  let kelas = '';
+  for (let i = 1; i < dataSiswa.length; i++) {
+    if (dataSiswa[i][0] === username) {
+      nama = dataSiswa[i][1];
+      kelas = dataSiswa[i][2];
+      break;
+    }
+  }
+  sheet.appendRow([
+    new Date(), nama, kelas, mapel, skor,
+    JSON.stringify(jawabanTeks), 0, username, 'force_submit_admin'
+  ]);
+
+  // Hapus semua key Redis terkait
+  redisCmd_('DEL', redisKey);
+  redisCmd_('DEL', `active:${token}:${username}`);
+  redisCmd_('DEL', `done:${mapel}:${username}`);
+  redisCmd_('DEL', `FINAL:${mapel}:${username}`);
+
+  return { success: true, skor: skor };
+}
+
+function resetActiveSession(token, username) {
+  const activeKey = `active:${token}:${username}`;
+  try {
+    redisCmd_('DEL', activeKey);
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+function redisCmd_(...args) {
+  const response = redisRequest_('POST', '', JSON.stringify(args));
+  const data = JSON.parse(response.getContentText());
+  if (data.error) throw new Error(data.error);
+  return data.result;
+}
+
 // ==================== DOGET ====================
-function doGet() {
+function doGet(e) {
+  // Ambil parameter 'page'
+  const page = e && e.parameter ? e.parameter.page : null;
+
+  if (page === 'admin') {
+    // Pastikan file dengan nama 'Admin' sudah dibuat
+    return HtmlService.createTemplateFromFile('Admin')
+      .evaluate()
+      .setTitle('Admin CBT MTsN 1 CIAMIS')
+      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
+      .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+  }
+
+  // Default: halaman user
   return HtmlService.createTemplateFromFile('Index')
     .evaluate()
     .setTitle('CBT MTsN 1 CIAMIS')
