@@ -1,8 +1,6 @@
 # CBT MTsN 1 CIAMIS - Computer Based Test
 
 Sistem ujian berbasis komputer (CBT) menggunakan Google Sheets sebagai database utama, Google Apps Script sebagai backend server, dan Redis (Upstash) untuk caching, penjadwalan acak, serta antrean submit yang aman.
-
-> Dibangun oleh [@lemonsprite](https://github.com/lemonsprites/)  
 > Lisensi: MIT
 
 ## ✨ Fitur Utama
@@ -38,7 +36,10 @@ Buat spreadsheet baru dengan **tiga sheet** (nama case‑sensitive):
 ### 2. Sheet `Jadwal`
 | A (mapel) | B (tanggal) | C (jam)       | D (durasi menit) | E (token)  | F (link Google Form) |
 |-----------|-------------|---------------|------------------|------------|----------------------|
-| `Matematika` | `02/05/2026` | `08:00:00` | `90`             | `TOKEN123` | `https://...`       |
+| `Matematika` | `02/05/2026` | `08:00:00` | `90`             | `TOKEN123` | `https://.../edit   |
+
+Note: Jangan lupa kasih akses editor untuk `anyone with link`
+
 
 > Format tanggal di **B** : `dd/MM/yyyy`  
 > Format jam di **C**   : `hh:mm:ss a` (AM/PM) **atau** `HH:mm:ss` (24 jam)
