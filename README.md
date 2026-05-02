@@ -139,6 +139,15 @@ Digunakan untuk migrasi data lama. Tidak wajib.
   - 60 operasi tulis per menit.  
   - Dengan batching (20 baris per tulis) untuk 500 siswa hanya ~25 operasi tulis → **aman**.
 
+`**Catatan:**`
+Ini untuk satu kali attempt/sesi dengan durasi 60-90 menit ya🤭
+
+untuk hal lainnya bisa disesuaikan dengan resikonya masing-masing, seperti autosave default (10 Menit Sekali) dan bisa dimatikan karena sudah ada localStorage backup, tapi antisipasi localStorage siswa penuh dan disk habis itu membuat corrupt data namun bisa jadi opsi untuk menekan request.
+
+atau seperti penyesuaian auto-save untuk 5 soal bisa di toleran sampai 10-20 soal tapi siswa otomatis akan melakukan simpan data terakhir setelah mencapai progres pengerjaan dan akan menghilangkan progres yang sedang on-going😊
+
+yah dengan pertimbangan penyesuaian bisa diatur.
+
 ## ⚙️ Konfigurasi yang Dapat Disesuaikan
 
 | Parameter           | Lokasi                         | Keterangan                                                                 |
