@@ -19,9 +19,17 @@ Sistem ujian berbasis komputer (CBT) menggunakan Google Sheets sebagai database 
 ## 📋 Prasyarat
 
 - Akun **Google** (bisa pribadi, tapi sangat disarankan **Google Workspace for Education** untuk kuota lebih besar)
+- Form Google dengan Pertanyaannya, saat ini hanya bisa akomodir tipe `MULTIPLE_COICE`. tapi dengan fitur:
+   - Stimulan (Ilustrasi Paragraf atau Ilustrasi pada soal misal illustrasi1 untuk soal 6-10) dengan tag `stimulan:id_stimulan` pada description/help text google form;
+   - Opsi Gambar dengan tag custom `opsi:link_gambar` (public asset tentunya)
+   - Untuk Opsi dan Soal diacak untuk meminimalisir kecurangan dengan data konsisten. sesuai `CACHE:id_form` di redis
 - Spreadsheet **Google Sheets** sebagai database
 - Akun **Redis** – disarankan [Upstash](https://upstash.com/) (free tier 10.000 command/hari)
 - (Opsional) Akun **GitHub** untuk menyimpan kode
+
+### DISCLAIMER 
+Script masih dalam tahap pengembangan dan baru final di data konsistensi dan masih perjalanan panjang, Yang penting sabar kalo error kulik lagi aja🤭
+jangan lupa fork kalo mau pakai repo! (Star kalo suka) selamat mencoba🙏
 
 ## 🗂️ Persiapan Spreadsheet
 
