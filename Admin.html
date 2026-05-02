@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <base target="_top">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Admin CBT MTsN 1 CIAMIS</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <style>
+    body {
+      background: #f0f2f5;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+    }
+
+    .admin-container {
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+
+    .card-login {
+      border-radius: 1rem;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+    }
+
+    .dashboard-card {
+      border-radius: 1rem;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    }
+
+    .table-custom {
+      margin-bottom: 0;
+      font-size: 0.85rem;
+    }
+
+    .table-custom thead th {
+      background: #e9ecef;
+      position: sticky;
+      top: 0;
+      white-space: nowrap;
+    }
+
+    .btn-sm {
+      margin: 2px;
+    }
+
+    .nav-tabs .nav-link {
+      font-weight: 500;
+      color: #4a5568;
+    }
+
+    .nav-tabs .nav-link.active {
+      color: #0d47a1;
+      font-weight: 600;
+      border-bottom: 2px solid #0d47a1;
+    }
+
+    .badge-time {
+      font-family: monospace;
+      font-size: 0.75rem;
+    }
+
+    pre {
+      background: #f8f9fa;
+      padding: 0.5rem;
+      border-radius: 0.5rem;
+      font-size: 0.7rem;
+      margin: 0;
+      white-space: pre-wrap;
+    }
+
+    .modal-lg {
+      max-width: 800px;
+    }
+
+    @media (max-width: 768px) {
+      .admin-container {
+        padding: 0 10px;
+      }
+
+      .table-custom {
+        font-size: 0.75rem;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="admin-container py-4">
+    <!-- Login Panel -->
+    <div id="login-panel" class="row justify-content-center">
+      <div class="col-md-5 col-lg-4">
+        <div class="card card-login p-4">
+          <h4 class="text-center fw-bold text-primary mb-4"><i class="bi bi-shield-lock"></i> Login Admin</h4>
+          <input type="password" id="admin-pass" class="form-control form-control-lg mb-3" placeholder="Password">
+          <button class="btn btn-primary btn-lg w-100 fw-semibold" onclick="doLogin()">Login</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Dashboard -->
+    <div id="dashboard-panel" style="display:none;">
+      <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2 class="h3 fw-bold text-primary m-0"><i class="bi bi-speedometer2"></i> Dashboard CBT</h2>
+        <button class="btn btn-outline-secondary" onclick="location.reload()"><i class="bi bi-arrow-clockwise"></i>
+          Refresh</button>
+      </div>
+
+      <!-- Tab Navigation -->
+      <ul class="nav nav-tabs mb-4" id="myTab" role="tablist">
+        <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#stats-panel">📊
+            Statistik & Data Final</button></li>
+        <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#sessions-panel">🟢 Active
+            Sessions</button></li>
+        <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#pending-panel">⏳ Jawaban
+            Sementara</button></li>
+        <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#selesai-panel">✅ Peserta
+            Selesai</button></li>
+      </ul>
+
+      <div class="tab-content">
+        <!-- Statistik -->
+        <div class="tab-pane fade show active" id="stats-panel">
+          <div id="stats" class="row g-3 mb-4"></div>
+          <div class="dashboard-card p-3">
+            <div class="table-responsive">
+              <div id="data-table"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Active Sessions -->
+        <div class="tab-pane fade" id="sessions-panel">
+          <div class="dashboard-card p-3">
+            <div class="d-flex justify-content-end mb-3">
+              <button class="btn btn-primary btn-sm" onclick="loadActiveSessions()"><i class="bi bi-arrow-repeat"></i>
+                Refresh Sessions</button>
+            </div>
+            <div id="active-sessions-table"></div>
+          </div>
+        </div>
+
+        <!-- Jawaban Sementara -->
+        <div class="tab-pane fade" id="pending-panel">
+          <div class="dashboard-card p-3">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+              <div>
+                <button class="btn btn-primary btn-sm" onclick="loadPendingAnswers()"><i class="bi bi-arrow-repeat"></i>
+                  Refresh Jawaban</button>
+              </div>
+              <div>
+                <button class="btn btn-warning btn-sm me-2" id="forceAllTempBtn" onclick="forceSubmitAllCbtKeys()"><i
+                    class="bi bi-database"></i> Submit Semua Temporary (cbt:*)</button>
+                <button class="btn btn-success btn-sm" id="batchSubmitBtn" onclick="forceSubmitBatch()"><i
+                    class="bi bi-send-fill"></i> Submit Semua Pending</button>
+              </div>
+            </div>
+            <div id="pending-answers-table"></div>
+          </div>
+        </div>
+
+        <!-- Peserta Selesai (Done Sessions) -->
+        <div class="tab-pane fade" id="selesai-panel">
+          <div class="dashboard-card p-3">
+            <div class="d-flex justify-content-end mb-3">
+              <button class="btn btn-primary btn-sm" onclick="loadDoneSessions()"><i class="bi bi-arrow-repeat"></i>
+                Refresh</button>
+            </div>
+            <div id="done-sessions-table"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal Detail Jawaban -->
+  <div class="modal fade" id="answerModal" tabindex="-1" aria-labelledby="answerModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header bg-primary text-white">
+          <h5 class="modal-title" id="answerModalLabel"><i class="bi bi-file-text"></i> Detail Jawaban</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body" id="answerModalBody" style="max-height: 500px; overflow-y: auto;"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    let redisEndpoint = '', redisToken = '';
+    let isForceSubmitting = false;
+    let isBatchSubmitting = false;
+
+    // === Fungsi Redis Client ===
+    async function redisCmd(...args) {
+      const response = await fetch(redisEndpoint, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${redisToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(args)
+      });
+      const data = await response.json();
+      if (data.error) throw new Error(data.error);
+      return data.result;
+    }
+
+    // Ambil session aktif (active:token:username)
+    async function getActiveSessionsFromRedis() {
+      const sessions = [];
+      let cursor = '0';
+      do {
+        const result = await redisCmd('SCAN', cursor, 'MATCH', 'active:*', 'COUNT', 100);
+        cursor = result[0];
+        const keys = result[1];
+        for (const key of keys) {
+          const parts = key.split(':');
+          if (parts.length < 3) continue;
+          const token = parts[1];
+          const username = parts[2];
+          let ttl = await redisCmd('TTL', key);
+          if (ttl < 0) ttl = 0;
+          let mapel = '?';
+          try {
+            const doneKeys = await redisCmd('KEYS', `done:*:${username}`);
+            if (doneKeys && doneKeys.length) mapel = doneKeys[0].split(':')[1] || '?';
+          } catch (e) { }
+          sessions.push({ token, username, mapel, ttl, key });
+        }
+      } while (cursor !== '0');
+      return sessions;
+    }
+
+    // Ambil session selesai (done:mapel:username)
+    async function getDoneSessionsFromRedis() {
+      const sessions = [];
+      let cursor = '0';
+      do {
+        const result = await redisCmd('SCAN', cursor, 'MATCH', 'done:*', 'COUNT', 100);
+        cursor = result[0];
+        const keys = result[1];
+        for (const key of keys) {
+          const parts = key.split(':');
+          if (parts.length < 3) continue;
+          const mapel = parts[1];
+          const username = parts[2];
+          let ttl = await redisCmd('TTL', key);
+          if (ttl < 0) ttl = 0;
+          sessions.push({ mapel, username, ttl, key });
+        }
+      } while (cursor !== '0');
+      return sessions;
+    }
+
+    async function getPendingAnswers() {
+      const result = [];
+      const pattern = 'cbt:*';
+      let cursor = '0';
+
+      do {
+        // SCAN untuk menghindari blocking (lebih baik dari KEYS)
+        const [nextCursor, keys] = await redisCmd('SCAN', cursor, 'MATCH', pattern, 'COUNT', 100);
+        cursor = nextCursor;
+
+        for (const key of keys) {
+          try {
+            // Ambil semua field dari hash di key tersebut
+            const jawabanObj = await redisCmd('HGETALL', key);
+            if (!jawabanObj || jawabanObj.length === 0) continue;
+
+            // Konversi array flat menjadi object { nomorSoal: jawaban, ... }
+            const jawaban = {};
+            for (let i = 0; i < jawabanObj.length; i += 2) {
+              jawaban[jawabanObj[i]] = jawabanObj[i + 1];
+            }
+
+            // Ekstrak token dan username dari key (format: cbt:token:username)
+            const parts = key.split(':');
+            const token = parts[1] || '';
+            const username = parts[2] || '';
+
+            // Ambil informasi lain (mapel, ttl) jika disimpan di hash
+            // Misalnya dengan field khusus: mapel, ttl
+            const mapel = jawaban['mapel'] || 'unknown';
+            const ttl = jawaban['ttl'] || 0;
+
+            result.push({
+              key: key,
+              token: token,
+              username: username,
+              mapel: mapel,
+              ttl: ttl,
+              jawaban: jawaban,
+              jumlahTerjawab: Object.keys(jawaban).filter(k => k !== 'mapel' && k !== 'ttl').length
+            });
+          } catch (e) {
+            console.error(`Gagal ambil data dari key ${key}`, e);
+          }
+        }
+      } while (cursor !== '0');
+
+      return result;
+    }
+
+    // Hapus total (semua key)
+    async function deleteSessionClient(token, username, mapel) {
+      await redisCmd('DEL', `cbt:${token}:${username}`);
+      await redisCmd('DEL', `done:${mapel}:${username}`);
+      await redisCmd('DEL', `FINAL:${mapel}:${username}`);
+      await redisCmd('DEL', `active:${token}:${username}`);
+    }
+
+    // Reset hanya active (siswa bisa login ulang, jawaban tetap)
+    async function resetActiveSession(token, username) {
+      await redisCmd('DEL', `active:${token}:${username}`);
+    }
+
+    // Reset total dari sheet
+    async function resetSiswaClient(username, mapel) {
+      let cursor = '0';
+      do {
+        const result = await redisCmd('SCAN', cursor, 'MATCH', `done:*:${username}`, 'COUNT', 100);
+        cursor = result[0];
+        for (const key of result[1]) await redisCmd('DEL', key);
+      } while (cursor !== '0');
+      await redisCmd('DEL', `done:${mapel}:${username}`);
+      await redisCmd('DEL', `FINAL:${mapel}:${username}`);
+      await redisCmd('DEL', `active:*:${username}`);
+      return new Promise((resolve) => {
+        google.script.run.withSuccessHandler(resolve).resetSiswaSheetOnly(username, mapel);
+      });
+    }
+
+    // Hapus key done (peserta selesai)
+    async function deleteDoneSession(mapel, username) {
+      const confirm = await Swal.fire({
+        title: 'Hapus status selesai?',
+        text: `Hapus status selesai untuk ${username} (${mapel})? Siswa bisa login lagi.`,
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: 'Ya, Hapus'
+      });
+      if (!confirm.isConfirmed) return;
+      await redisCmd('DEL', `done:${mapel}:${username}`);
+      loadDoneSessions();
+      loadStats();
+      loadData();
+    }
+
+    // ========== UI Functions ==========
+    async function doLogin() {
+      const pass = document.getElementById('admin-pass').value;
+      if (!pass) { Swal.fire('Error', 'Password kosong', 'error'); return; }
+      try {
+        const res = await new Promise((resolve, reject) => {
+          google.script.run.withSuccessHandler(resolve).withFailureHandler(reject).adminLoginWithToken(pass);
+        });
+        if (res.success) {
+          redisEndpoint = res.redisEndpoint;
+          redisToken = res.redisToken;
+          document.getElementById('login-panel').style.display = 'none';
+          document.getElementById('dashboard-panel').style.display = 'block';
+          loadStats(); loadData(); loadActiveSessions(); loadPendingAnswers(); loadDoneSessions();
+        } else { Swal.fire('Error', res.error || 'Login gagal', 'error'); }
+      } catch (err) { Swal.fire('Error', err.message, 'error'); }
+    }
+
+    function loadStats() {
+      google.script.run.withSuccessHandler(stats => {
+        document.getElementById('stats').innerHTML = `
+        <div class="col-md-4"><div class="card h-100 border-0 shadow-sm"><div class="card-body text-center"><h2 class="text-primary fw-bold mb-0">${stats.totalSelesai}</h2><p class="text-muted mb-0">Siswa Selesai</p></div></div></div>
+        <div class="col-md-4"><div class="card h-100 border-0 shadow-sm"><div class="card-body text-center"><h2 class="text-success fw-bold mb-0">${stats.totalSiswaAktif}</h2><p class="text-muted mb-0">Siswa Aktif (est.)</p></div></div></div>
+        <div class="col-md-4"><div class="card h-100 border-0 shadow-sm"><div class="card-body"><h5 class="fw-semibold">Per Mapel</h5><pre>${JSON.stringify(stats.perMapel, null, 2)}</pre></div></div></div>
+      `;
+      }).getStats();
+    }
+
+    function loadData() {
+      google.script.run.withSuccessHandler(res => {
+        let html = '<table class="table table-custom table-hover align-middle"><thead><tr>';
+        res.headers.forEach(h => html += `<th>${h}</th>`);
+        html += '<th>Aksi</th></tr></thead><tbody>';
+        res.data.forEach(row => {
+          html += '<tr>';
+          row.forEach(cell => html += `<td>${cell || ''}</td>`);
+          const username = row[7] || '', mapel = row[3] || '';
+          html += `<td><button class="btn btn-sm btn-outline-danger" onclick="resetSiswa('${username}', '${mapel}')"><i class="bi bi-trash3"></i> Reset</button>`;
+          html += '</tr>';
+        });
+        html += '</tbody><td>';
+        document.getElementById('data-table').innerHTML = html;
+      }).getDataPermanen(100, 0);
+    }
+
+    async function loadActiveSessions() {
+      const container = document.getElementById('active-sessions-table');
+      container.innerHTML = '<div class="text-center p-4"><div class="spinner-border text-primary"></div> Memuat...</div>';
+      try {
+        const sessions = await getActiveSessionsFromRedis();
+        if (!sessions.length) { container.innerHTML = '<div class="alert alert-info">Tidak ada session aktif.</div>'; return; }
+        let html = '<div class="table-responsive"><table class="table table-custom table-hover"><thead><tr><th>Token</th><th>Username</th><th>Mapel</th><th>Sisa Waktu</th><th>Aksi</th></table></thead><tbody>';
+        for (const s of sessions) {
+          const timeLeft = `${Math.floor(s.ttl / 60)}:${(s.ttl % 60).toString().padStart(2, '0')}`;
+          html += `<tr>
+          <td><code>${s.token.substring(0, 8)}...</code></td>
+          <td>${s.username}</td>
+          <td>${s.mapel}</td>
+          <td><span class="badge bg-secondary badge-time">${timeLeft}</span></td>
+          <td>
+            <button class="btn btn-sm btn-warning" onclick="resetActiveSession('${s.token}', '${s.username}')"><i class="bi bi-arrow-repeat"></i> Reset Session</button>
+            <button class="btn btn-sm btn-danger" onclick="deleteSession('${s.token}', '${s.username}', '${s.mapel}')"><i class="bi bi-trash"></i> Hapus Total</button>
+          </td>
+        `;
+        }
+        html += '</tbody></td></div>';
+        container.innerHTML = html;
+      } catch (err) { container.innerHTML = '<div class="alert alert-danger">Gagal memuat session.</div>'; Swal.fire('Error', err.message, 'error'); }
+    }
+
+    async function loadDoneSessions() {
+      const container = document.getElementById('done-sessions-table');
+      if (!container) return;
+      container.innerHTML = '<div class="text-center p-4"><div class="spinner-border text-primary"></div> Memuat...</div>';
+      try {
+        const sessions = await getDoneSessionsFromRedis();
+        if (!sessions.length) { container.innerHTML = '<div class="alert alert-info">Tidak ada peserta selesai.</div>'; return; }
+        let html = '<div class="table-responsive"><table class="table table-custom table-hover"><thead><tr><th>Mapel</th><th>Username</th><th>Sisa TTL</th><th>Aksi</th></tr></thead><tbody>';
+        for (const s of sessions) {
+          const timeLeft = `${Math.floor(s.ttl / 60)}:${(s.ttl % 60).toString().padStart(2, '0')}`;
+          html += `<tr>
+          <td>${s.mapel}</td>
+          <td>${s.username}</td>
+          <td><span class="badge bg-secondary badge-time">${timeLeft}</span></td>
+          <td><button class="btn btn-sm btn-danger" onclick="deleteDoneSession('${s.mapel}', '${s.username}')"><i class="bi bi-x-circle"></i> Hapus</button></td>
+        `;
+        }
+        html += '</tbody></table></div>';
+        container.innerHTML = html;
+      } catch (err) { container.innerHTML = '<div class="alert alert-danger">Gagal memuat data selesai.</div>'; Swal.fire('Error', err.message, 'error'); }
+    }
+
+    async function loadPendingAnswers() {
+      const container = document.getElementById('pending-answers-table');
+      container.innerHTML = '<div class="text-center p-4"><div class="spinner-border text-primary"></div> Memuat...</div>';
+      try {
+        const pending = await getPendingAnswers();
+        if (!pending.length) { container.innerHTML = '<div class="alert alert-info">Tidak ada jawaban sementara.</div>'; return; }
+        let html = '<div class="table-responsive"><table class="table table-custom table-hover"><thead><tr><th>Token</th><th>Username</th><th>Mapel</th><th>Jml Terjawab</th><th>Sisa Waktu</th><th>Aksi</th></tr></thead><tbody>';
+        for (const p of pending) {
+          const timeLeft = `${Math.floor(p.ttl / 60)}:${(p.ttl % 60).toString().padStart(2, '0')}`;
+          html += `<tr>
+          <td><code>${p.token.substring(0, 8)}...</code></td>
+          <td>${p.username}</td>
+          <td>${p.mapel}</td>
+          <td>${p.jumlahTerjawab}</td>
+          <td><span class="badge bg-secondary badge-time">${timeLeft}</span></td>
+          <td>
+            <button class="btn btn-sm btn-info" onclick="showAnswerDetail('${p.token}', '${p.username}', '${p.mapel}')"><i class="bi bi-eye"></i> Lihat</button>
+            <button class="btn btn-sm btn-success" onclick="forceSubmit('${p.token}', '${p.username}', '${p.mapel}')"><i class="bi bi-send"></i> Submit</button>
+          </td>
+        `;
+        }
+        html += '</tbody></table></div>';
+        container.innerHTML = html;
+      } catch (err) { container.innerHTML = '<div class="alert alert-danger">Gagal memuat jawaban sementara.</div>'; Swal.fire('Error', err.message, 'error'); }
+    }
+
+    async function showAnswerDetail(token, username, mapel) {
+      try {
+        const key = `cbt:${token}:${username}`;
+        const jawabanObj = await redisCmd('HGETALL', key);
+        const jawaban = {};
+        for (let i = 0; i < jawabanObj.length; i += 2) jawaban[jawabanObj[i]] = jawabanObj[i + 1];
+        let html = `<h5 class="mb-3">Jawaban <strong>${username}</strong> (${mapel})</h5><ul class="list-group">`;
+        if (Object.keys(jawaban).length === 0) html += '<li class="list-group-item">Belum ada jawaban tersimpan</li>';
+        for (const [soalId, optKey] of Object.entries(jawaban)) html += `<li class="list-group-item"><strong>Soal ID:</strong> ${soalId} → <code>${optKey}</code></li>`;
+        html += `</ul><small class="text-muted mt-2 d-block">* Format kode opsi (id_indeks)</small>`;
+        document.getElementById('answerModalBody').innerHTML = html;
+        new bootstrap.Modal(document.getElementById('answerModal')).show();
+      } catch (err) { Swal.fire('Error', err.message, 'error'); }
+    }
+
+    // Submit per siswa
+    async function forceSubmit(token, username, mapel) {
+      if (isForceSubmitting) { Swal.fire('Info', 'Sedang memproses...', 'info'); return; }
+      const confirm = await Swal.fire({ title: 'Paksa Submit?', text: `Kirim jawaban ${username} (${mapel}) ke sheet.`, icon: 'question', showCancelButton: true, confirmButtonText: 'Ya, Submit!' });
+      if (!confirm.isConfirmed) return;
+      isForceSubmitting = true;
+      Swal.fire({ title: 'Memproses...', html: '<span class="spinner-border text-primary mt-2"></span>', allowOutsideClick: false, showConfirmButton: false });
+      try {
+        const res = await new Promise((resolve, reject) => { google.script.run.withSuccessHandler(resolve).withFailureHandler(reject).adminForceSubmit(token, username); });
+        Swal.close();
+        if (res.success) { Swal.fire('Berhasil', `Skor ${res.skor}`, 'success'); await loadPendingAnswers(); await loadActiveSessions(); loadData(); loadStats(); }
+        else Swal.fire('Gagal', res.error || 'Terjadi kesalahan', 'error');
+      } catch (err) { Swal.close(); Swal.fire('Error', err.message, 'error'); }
+      finally { isForceSubmitting = false; }
+    }
+
+    // Submit batch (berdasarkan session aktif)
+    async function forceSubmitBatch() {
+      if (isBatchSubmitting) { Swal.fire('Info', 'Batch sedang berjalan...', 'info'); return; }
+      const confirm = await Swal.fire({ title: 'Submit Semua Jawaban Sementara?', text: 'Proses satu per satu.', icon: 'warning', showCancelButton: true, confirmButtonText: 'Ya, Submit Semua!' });
+      if (!confirm.isConfirmed) return;
+      const pending = await getPendingAnswers();
+      if (!pending.length) { Swal.fire('Info', 'Tidak ada jawaban sementara.', 'info'); return; }
+      isBatchSubmitting = true;
+      const batchBtn = document.getElementById('batchSubmitBtn');
+      batchBtn.disabled = true;
+      batchBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Memproses...';
+      let successCount = 0, failCount = 0;
+      Swal.fire({ title: 'Batch Submit', html: `<div id="batchProgress">Memulai...</div><div class="progress mt-3"><div id="batchProgressBar" class="progress-bar" style="width:0%"></div></div>`, allowOutsideClick: false, showConfirmButton: false, willClose: () => { isBatchSubmitting = false; batchBtn.disabled = false; batchBtn.innerHTML = '<i class="bi bi-send-fill"></i> Submit Semua Pending'; } });
+      for (let i = 0; i < pending.length; i++) {
+        const p = pending[i];
+        const percent = Math.round(((i + 1) / pending.length) * 100);
+        document.getElementById('batchProgress').innerHTML = `Memproses ${i + 1} dari ${pending.length}: ${p.username} (${p.mapel})...<br>Berhasil: ${successCount}, Gagal: ${failCount}`;
+        document.getElementById('batchProgressBar').style.width = `${percent}%`;
+        document.getElementById('batchProgressBar').innerHTML = `${percent}%`;
+        try {
+          const res = await new Promise((resolve, reject) => { google.script.run.withSuccessHandler(resolve).withFailureHandler(reject).adminForceSubmit(p.token, p.username); });
+          if (res.success) successCount++; else failCount++;
+        } catch (err) { failCount++; }
+        await new Promise(r => setTimeout(r, 100));
+      }
+      Swal.close();
+      await loadPendingAnswers(); await loadActiveSessions(); loadData(); loadStats();
+      Swal.fire('Batch Selesai', `Berhasil: ${successCount}, Gagal: ${failCount}`, successCount > 0 ? 'success' : 'error');
+    }
+
+    async function resetSiswa(username, mapel) {
+      const confirm = await Swal.fire({ title: 'Yakin?', text: `Reset data ${username} (${mapel})?`, icon: 'warning', showCancelButton: true, confirmButtonText: 'Ya, Reset!' });
+      if (!confirm.isConfirmed) return;
+      try {
+        await resetSiswaClient(username, mapel);
+        Swal.fire('Berhasil', 'Data direset.', 'success');
+        loadData(); loadStats(); loadActiveSessions(); loadPendingAnswers(); loadDoneSessions();
+      } catch (err) { Swal.fire('Gagal', err.message, 'error'); }
+    }
+
+    async function deleteSession(token, username, mapel) {
+      const confirm = await Swal.fire({ title: 'Hapus Total Session?', text: `Semua data ${username} (${mapel}) akan dihapus.`, icon: 'warning', showCancelButton: true, confirmButtonText: 'Ya, Hapus Total' });
+      if (!confirm.isConfirmed) return;
+      try {
+        await deleteSessionClient(token, username, mapel);
+        Swal.fire('Sukses', 'Session dihapus total.', 'success');
+        loadActiveSessions(); loadPendingAnswers(); loadDoneSessions();
+      } catch (err) { Swal.fire('Gagal', err.message, 'error'); }
+    }
+
+    async function resetActiveSession(token, username) {
+      const confirm = await Swal.fire({ title: 'Reset Session?', text: `Siswa ${username} akan dikeluarkan, jawaban tetap tersimpan.`, icon: 'question', showCancelButton: true, confirmButtonText: 'Ya, Reset' });
+      if (!confirm.isConfirmed) return;
+      try {
+        await redisCmd('DEL', `active:${token}:${username}`);
+        Swal.fire('Sukses', 'Session direset.', 'success');
+        loadActiveSessions(); loadPendingAnswers();
+      } catch (err) { Swal.fire('Gagal', err.message, 'error'); }
+    }
+
+    // ========== FITUR BARU: Submit semua key cbt:* dengan filter token ==========
+    async function forceSubmitAllCbtKeys() {
+      if (isBatchSubmitting) {
+        Swal.fire('Info', 'Sedang ada proses batch, tunggu selesai.', 'info');
+        return;
+      }
+
+      // Modal input token filter
+      const { value: tokenFilter } = await Swal.fire({
+        title: 'Filter Token (Opsional)',
+        input: 'text',
+        inputLabel: 'Masukkan token spesifik (kosongkan untuk semua)',
+        inputPlaceholder: 'Contoh: UM7047',
+        showCancelButton: true,
+        confirmButtonText: 'Proses',
+        cancelButtonText: 'Batal'
+      });
+      if (tokenFilter === undefined) return; // batal
+
+      const btn = document.getElementById('forceAllTempBtn');
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Scanning...';
+
+      // Tentukan pola SCAN
+      const pattern = tokenFilter && tokenFilter.trim() !== '' ? `cbt:${tokenFilter.trim()}:*` : 'cbt:*';
+
+      let cursor = '0';
+      let keys = [];
+      try {
+        do {
+          const result = await redisCmd('SCAN', cursor, 'MATCH', pattern, 'COUNT', 100);
+          cursor = result[0];
+          keys.push(...result[1]);
+        } while (cursor !== '0');
+      } catch (err) {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-database"></i> Submit Semua Temporary (cbt:*)';
+        Swal.fire('Error', 'Gagal scan Redis: ' + err.message, 'error');
+        return;
+      }
+
+      if (keys.length === 0) {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-database"></i> Submit Semua Temporary (cbt:*)';
+        Swal.fire('Info', `Tidak ada data temporary dengan pola ${pattern}.`, 'info');
+        return;
+      }
+
+      const confirm = await Swal.fire({
+        title: `Submit ${keys.length} data temporary?`,
+        text: `Pola: ${pattern}\nProses akan berjalan satu per satu. Lanjutkan?`,
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: 'Ya, Submit Semua!',
+        cancelButtonText: 'Batal'
+      });
+      if (!confirm.isConfirmed) {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-database"></i> Submit Semua Temporary (cbt:*)';
+        return;
+      }
+
+      isBatchSubmitting = true;
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Memproses...';
+
+      let successCount = 0, failCount = 0;
+      const total = keys.length;
+
+      Swal.fire({
+        title: 'Memproses Semua Temporary',
+        html: `<div id="batchProgress">Memulai...</div><div class="progress mt-3"><div id="batchProgressBar" class="progress-bar" role="progressbar" style="width:0%"></div></div>`,
+        allowOutsideClick: false,
+        showConfirmButton: false,
+        willClose: () => {
+          isBatchSubmitting = false;
+          btn.disabled = false;
+          btn.innerHTML = '<i class="bi bi-database"></i> Submit Semua Temporary (cbt:*)';
+        }
+      });
+
+      for (let i = 0; i < keys.length; i++) {
+        const key = keys[i];
+        const parts = key.split(':');
+        if (parts.length < 3) {
+          failCount++;
+          continue;
+        }
+        const token = parts[1];
+        const username = parts[2];
+        const percent = Math.round(((i + 1) / total) * 100);
+        document.getElementById('batchProgress').innerHTML = `Memproses ${i + 1} dari ${total}: ${username}<br>Berhasil: ${successCount}, Gagal: ${failCount}`;
+        document.getElementById('batchProgressBar').style.width = `${percent}%`;
+        document.getElementById('batchProgressBar').innerHTML = `${percent}%`;
+
+        try {
+          const res = await new Promise((resolve, reject) => {
+            google.script.run.withSuccessHandler(resolve).withFailureHandler(reject).adminForceSubmit(token, username);
+          });
+          if (res.success) successCount++;
+          else failCount++;
+        } catch (err) {
+          console.error(err);
+          failCount++;
+        }
+        await new Promise(r => setTimeout(r, 150));
+      }
+
+      Swal.close();
+      await loadData();
+      await loadStats();
+      await loadActiveSessions();
+      await loadPendingAnswers();
+      await loadDoneSessions();
+      Swal.fire('Selesai', `Berhasil: ${successCount}, Gagal: ${failCount}`, successCount > 0 ? 'success' : 'error');
+    }
+  </script>
+</body>
+
+</html>
