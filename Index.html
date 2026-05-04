@@ -155,6 +155,8 @@
     .rtl-opt {
       direction: rtl;
       text-align: right;
+      font-family: 'Amiri', 'Traditional Arabic', 'Noto Sans Arabic', 'Tahoma', sans-serif;
+      font-size: 1.4rem;
     }
 
     .rtl-opt .opsi-badge {
@@ -431,6 +433,7 @@
       if (!currentRedisKey || Object.keys(jawUser).length === 0) return;
       try { await hsetBatch(currentRedisKey, jawUser); } catch (e) { console.error('Gagal simpan jawaban batch:', e); }
     }
+
     function startAutoSave() {
       if (autoSaveInterval) clearInterval(autoSaveInterval);
       autoSaveInterval = setInterval(() => { if (statusUjian === "AKTIF") saveAllJawaban(); }, 600000);
@@ -780,7 +783,7 @@
     async function mulaiProses() {
       const userInput = document.getElementById('in-user').value;
       const k = document.getElementById('in-kelas').value;
-      const t = document.getElementById('in-token').value;
+      const t = document.getElementById('in-token').value.trim();
       if (!userInput || !k || !t) return Swal.fire('Error', 'Lengkapi semua field!', 'error');
       currentToken = t; currentKelas = k; setRedisKey(currentToken, '');
       Swal.fire({ title: 'Menyiapkan Soal...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
@@ -810,7 +813,7 @@
               statusUjian = "AKTIF";
               gracePeriodEnd = Date.now() + 5000;
               startFullscreenWatchdog();
-              setex(`active:${currentToken}:${currentUsername}`, sisa + 300, '1');
+              redisCommand('SET', `active:${currentToken}:${currentUsername}`, '1');
               document.getElementById('view-login').classList.add('d-none');
               document.getElementById('view-exam').classList.remove('d-none');
               document.getElementById('wrapper-timer').classList.remove('d-none');

@@ -175,8 +175,8 @@ function cekLogin(tokenUser, inputUser, kelasUser) {
   try {
     const dataJadwal = getDataJadwal();
     if (dataJadwal.length <= 1) return { status: "error", pesan: "Data jadwal kosong!" };
-    const tokenInput = String(tokenUser).trim();
-    const inputClean = String(inputUser).trim();
+    const tokenInput = cleanKey(String(tokenUser).trim());
+    const inputClean = cleanKey(String(inputUser).trim());
     if (!inputClean) return { status: "error", pesan: "Username/Nama wajib diisi!" };
     const validasi = validasiSiswa(inputClean, kelasUser);
     if (!validasi.valid) return { status: "error", pesan: validasi.pesan };
@@ -640,6 +640,206 @@ function submitJawabanSementaraKeRedis() {
   return { success: true, totalSiswa: totalSaved };
 }
 
+// ==================== FUNGSI ADMIN UNTUK RESET BERDASARKAN USERNAME ====================
+
+/**
+ * Reset TOTAL: hapus semua key Redis milik siswa + hapus baris di sheet "Jawaban"
+ * @param {string} username - NIS atau username siswa
+ * @param {string} mapel - (opsional) kode mapel, jika kosong akan cari otomatis dari token yang ditemukan
+ */
+function adminResetTotal(username, mapel) {
+  let deleted = 0;
+  // 1. Hapus semua key Redis yang mengandung username
+  const patterns = [
+    `active:*:${username}`,
+    `cbt:*:${username}`,
+    `done:*:${username}`,
+    `FINAL:*:${username}`,
+    `shuffle:*:${username}`
+  ];
+  for (const pattern of patterns) {
+    let cursor = '0';
+    do {
+      const result = redisCmd_('SCAN', cursor, 'MATCH', pattern, 'COUNT', 100);
+      cursor = result[0];
+      const keys = result[1];
+      for (const key of keys) {
+        redisCmd_('DEL', key);
+        deleted++;
+      }
+    } while (cursor !== '0');
+  }
+
+  // 2. Hapus baris di sheet "Jawaban" berdasarkan username (dan mapel jika diberikan)
+  const sheet = SS.getSheetByName(SHEET_PERMANEN); // "Jawaban"
+  if (sheet) {
+    const data = sheet.getDataRange().getValues();
+    const rowsToDelete = [];
+    for (let i = data.length - 1; i >= 1; i--) {
+      const rowUsername = data[i][7];   // kolom username (indeks 7, sesuaikan!)
+      const rowMapel = data[i][3];    // kolom mapel   (indeks 3)
+      if (rowUsername === username) {
+        if (!mapel || rowMapel === mapel) {
+          rowsToDelete.push(i);
+        }
+      }
+    }
+    for (const idx of rowsToDelete.sort((a, b) => b - a)) {
+      sheet.deleteRow(idx + 1);
+    }
+  }
+
+  return { message: `Reset total ${username} (${mapel || 'semua mapel'}) berhasil. ${deleted} key Redis dihapus.` };
+}
+
+/**
+ * Reset hanya session aktif (siswa keluar paksa, jawaban sementara tetap ada)
+ */
+function adminResetActiveOnly(username) {
+  let deleted = 0;
+  let cursor = '0';
+  do {
+    const result = redisCmd_('SCAN', cursor, 'MATCH', `active:*:${username}`, 'COUNT', 100);
+    cursor = result[0];
+    const keys = result[1];
+    for (const key of keys) {
+      redisCmd_('DEL', key);
+      deleted++;
+    }
+  } while (cursor !== '0');
+  return { message: `Session aktif ${username} direset. ${deleted} session dihapus.` };
+}
+
+
+function adminResetDone(username) {
+  let deleted = 0;
+  const patterns = [`done:*:${username}`, `cbt:*:${username}`];
+
+  for (const pattern of patterns) {
+    let cursor = '0';
+    do {
+      const result = redisCmd_('SCAN', cursor, 'MATCH', pattern, 'COUNT', 100);
+      cursor = result[0];
+      const keys = result[1];
+      for (const key of keys) {
+        redisCmd_('DEL', key);
+        deleted++;
+      }
+    } while (cursor !== '0');
+  }
+
+  return { message: `Pengerjaan untuk ${username} dihapus. ${deleted} key dihapus.` };
+}
+
+/**
+ * Submit paksa jawaban sementara ke sheet (tanpa melalui antrean)
+ * @param {string} username - NIS/username siswa
+ * @param {string} mapel - kode mapel (wajib, karena diperlukan untuk cari token)
+ */
+function adminForceSubmitByUsername(username, mapel) {
+  // Cari key cbt:*:username
+  let keyPattern = `cbt:*:${username}`;
+  let keys = [];
+  let cursor = '0';
+  do {
+    const result = redisCmd_('SCAN', cursor, 'MATCH', keyPattern, 'COUNT', 100);
+    cursor = result[0];
+    keys.push(...result[1]);
+  } while (cursor !== '0');
+
+  if (keys.length === 0) {
+    throw new Error(`Tidak ada jawaban sementara untuk ${username}`);
+  }
+  const key = keys[0];
+  const token = key.split(':')[1];
+
+  // Panggil fungsi submit yang sudah ada (adminForceSubmit)
+  return adminForceSubmit(token, username);
+}
+
+/**
+ * Hapus hanya data final (nilai) di Redis dan sheet, tanpa menyentuh jawaban sementara
+ */
+function adminHapusFinalOnly(username, mapel) {
+  if (!mapel) throw new Error('Mapel harus diisi untuk menghapus data final');
+  const finalKey = `FINAL:${mapel}:${username}`;
+  let deleted = 0;
+  if (redisCmd_('EXISTS', finalKey) === 1) {
+    redisCmd_('DEL', finalKey);
+    deleted++;
+  }
+
+  // Hapus baris di sheet
+  const sheet = SS.getSheetByName(SHEET_PERMANEN);
+  if (sheet) {
+    const data = sheet.getDataRange().getValues();
+    for (let i = data.length - 1; i >= 1; i--) {
+      if (data[i][7] === username && data[i][3] === mapel) {
+        sheet.deleteRow(i + 1);
+        break;
+      }
+    }
+  }
+  return { message: `Data final ${username} (${mapel}) dihapus. ${deleted} key Redis dihapus.` };
+}
+
+/**
+ * Helper: mengambil jadwal berdasarkan token
+ */
+function getJadwalByToken(token) {
+  const dataJadwal = getDataJadwal();
+  for (let i = 1; i < dataJadwal.length; i++) {
+    if (String(dataJadwal[i][4]).trim() === token) {
+      return {
+        mapelLengkap: dataJadwal[i][0],
+        mapelKode: dataJadwal[i][6],  // kolom MAPEL (kode singkat)
+        token: token,
+        linkForm: dataJadwal[i][5]
+      };
+    }
+  }
+  return null;
+}
+
+function getMapelByToken(token) {
+  const jadwal = getJadwalByToken(token); // fungsi ini sudah Anda miliki
+  return jadwal ? jadwal.mapelKode : null;
+}
+
+/**
+ * Mendapatkan token dan mapel dari username dengan memeriksa Redis (key cbt:*:username atau active:*:username)
+ * @returns {Object|null} { token, mapel } atau null jika tidak ditemukan
+ */
+function getTokenAndMapelByUsername(username) {
+  // Cari dari key cbt:*:username
+  let cursor = '0';
+  do {
+    const result = redisCmd_('SCAN', cursor, 'MATCH', `cbt:*:${username}`, 'COUNT', 100);
+    cursor = result[0];
+    const keys = result[1];
+    if (keys.length > 0) {
+      const token = keys[0].split(':')[1];
+      const mapel = getMapelByToken(token);
+      if (mapel) return { token, mapel };
+    }
+  } while (cursor !== '0');
+
+  // Cari dari key active:*:username
+  cursor = '0';
+  do {
+    const result = redisCmd_('SCAN', cursor, 'MATCH', `active:*:${username}`, 'COUNT', 100);
+    cursor = result[0];
+    const keys = result[1];
+    if (keys.length > 0) {
+      const token = keys[0].split(':')[1];
+      const mapel = getMapelByToken(token);
+      if (mapel) return { token, mapel };
+    }
+  } while (cursor !== '0');
+
+  return null;
+}
+
 // =============== OPTIMASI SUBMISI ==============
 
 const BATCH_SIZE = 20;        // Tulis setiap 20 submit
@@ -1003,6 +1203,10 @@ async function testFlowSiswa() {
   console.log('✅ Test selesai. Periksa sheet Jawaban untuk 5 entri terakhir.');
 
   return results;
+}
+
+function cleanKey(str) {
+  return str.replace(/\s/g, ''); // hapus semua whitespace (spasi, tab, newline)
 }
 
 // ==================== DOGET ====================
