@@ -67,31 +67,24 @@ function getDataJadwal() {
 function getSoalDanKunci(url) {
   const redisKey = `CACHE_SOAL:${Utilities.base64Encode(url).substring(0, 50)}`;
   try {
+    // Cek cache
     const cacheResp = redisRequest_('GET', `/get/${encodeURIComponent(redisKey)}`);
     const cacheData = JSON.parse(cacheResp.getContentText());
-    if (cacheData && cacheData.result) return JSON.parse(cacheData.result);
-
-    const lockKey = `${redisKey}:lock`;
-    const lockPath = `/set/${encodeURIComponent(lockKey)}/LOCKED?nx=true&ex=10`;
-    const lockResp = JSON.parse(redisRequest_('GET', lockPath).getContentText());
-    if (lockResp.result === null) {
-      Utilities.sleep(1000);
-      const retryResp = redisRequest_('GET', `/get/${encodeURIComponent(redisKey)}`);
-      const retryData = JSON.parse(retryResp.getContentText());
-      if (retryData && retryData.result) return JSON.parse(retryData.result);
+    if (cacheData && cacheData.result) {
+      return JSON.parse(cacheData.result);
     }
 
+    // Cache tidak ada → ambil dari Google Form
     const form = FormApp.openByUrl(url);
     const items = form.getItems();
 
-    // --- KUMPULKAN STIMULUS DARI HELP TEXT YANG BERAWALAN "stimulus:" ---
+    // --- KUMPULKAN STIMULUS ---
     const stimulusMap = {};
     items.forEach(item => {
       const help = item.getHelpText() || "";
       const stimMatch = help.match(/^stimulus:(\S+)/i);
       if (stimMatch) {
         const id = stimMatch[1];
-        // Ambil teks stimulus: hilangkan keyword "stimulus:xxx" dari help text
         const text = help.replace(/^stimulus:\S+\s*/i, '').trim() || item.getTitle();
         stimulusMap[id] = text;
       }
@@ -141,10 +134,12 @@ function getSoalDanKunci(url) {
         kunci[id] = jawabanBenar.length === 1 ? jawabanBenar[0] : jawabanBenar;
       }
     });
-    const hasil = { soal, kunci, stimulus: stimulusMap }; // <-- KIRIM JUGA STIMULUS
-    const setPath = `/set/${encodeURIComponent(redisKey)}?ex=7200`;
-    redisRequest_('POST', setPath, JSON.stringify(hasil));
-    redisRequest_('GET', `/del/${encodeURIComponent(lockKey)}`);
+
+    const hasil = { soal, kunci, stimulus: stimulusMap };
+
+    // Simpan cache 2 jam (7200 detik)
+    redisRequest_('POST', `/set/${encodeURIComponent(redisKey)}?ex=7200`, JSON.stringify(hasil));
+
     return hasil;
   } catch (e) {
     console.error("getSoalDanKunci error:", e);
@@ -288,21 +283,47 @@ function cekLogin(tokenUser, inputUser, kelasUser) {
 
 // ==================== SIMPAN FINAL KE SHEET ====================
 function simpanKeDatabaseFinal(payload) {
-  // Hitung skor
+  // Cek duplikasi
+  const doneKey = `done:${payload.mapel}:${payload.username}`;
+  try {
+    if (redisCmd_('EXISTS', doneKey) === 1) {
+      console.log(`Submit duplikat ditolak: ${payload.username} - ${payload.mapel}`);
+      return -1;
+    }
+  } catch (e) {
+    console.error('Gagal cek duplikasi:', e);
+  }
+
+  // Hitung jawaban benar
   let skorBenar = 0;
   const totalSoal = Object.keys(payload.kunci).length;
   for (let id in payload.kunci) {
-    const user = payload.jawaban[id];
-    const benar = payload.kunci[id];
-    if (Array.isArray(benar)) {
-      if (Array.isArray(user) && JSON.stringify(user.sort()) === JSON.stringify(benar.sort())) skorBenar++;
+    const userJawab = payload.jawaban[id];
+    const kunciJawab = payload.kunci[id];
+    if (Array.isArray(kunciJawab)) {
+      const userArr = Array.isArray(userJawab) ? userJawab : [userJawab];
+      if (userArr.sort().join() === kunciJawab.sort().join()) skorBenar++;
     } else {
-      if (user === benar) skorBenar++;
+      if (userJawab === kunciJawab) skorBenar++;
     }
   }
-  const skorFinal = totalSoal > 0 ? Math.round((skorBenar / totalSoal) * 100) : 0;
+
+  // Hitung skor mentah
+  let skorMentah = totalSoal > 0 ? Math.round((skorBenar / totalSoal) * 100) : 0;
+
+  // Potongan pelanggaran: 5 poin tiap kelipatan 3
+  const pengurang = 5 * Math.floor((payload.pelanggaran || 0) / 3);
+  const skorFinal = Math.max(0, skorMentah - pengurang);
+
   payload.skorFinal = skorFinal;
+
+  // Masukkan antrean tulis ke sheet
   addToWriteQueue(payload);
+
+  // Tandai sudah ujian & hapus sesi aktif
+  redisCmd_('SETEX', doneKey, 86400, '1');
+  redisCmd_('DEL', `active:${payload.token}:${payload.username}`);
+
   return skorFinal;
 }
 
@@ -646,28 +667,72 @@ function setupPeriodicFlush() {
 
 function flushWriteQueue() {
   const lock = LockService.getScriptLock();
-  if (!lock.tryLock(1000)) return; // coba lock, jika gagal lewati
+  if (!lock.tryLock(1000)) return;
   try {
     const queueKey = 'pending_submissions_batch';
-    const batch = [];
-    let item;
-    while ((item = redisCmd_('LPOP', queueKey)) !== null) {
-      batch.push(JSON.parse(item));
-    }
-    if (batch.length === 0) return;
+    const len = redisCmd_('LLEN', queueKey);
+    if (len === 0) return;
+
+    const batchSize = Math.min(len, BATCH_SIZE);
+    const items = redisCmd_('LRANGE', queueKey, 0, batchSize - 1);
+    const batch = items.map(JSON.parse);
+
+    const timezone = Session.getScriptTimeZone();
+    const newRows = batch.map(p => {
+      const ts = p.timestamp ? new Date(p.timestamp) : new Date();
+      if (isNaN(ts.getTime())) ts = new Date(); // fallback
+      return [
+        Utilities.formatDate(ts, timezone, "M/d/yyyy HH:mm:ss"),
+        p.nama,
+        p.kelas,
+        p.mapel,
+        p.skorFinal,
+        JSON.stringify(p.jawaban),
+        p.pelanggaran,
+        p.username,
+        p.loginVia
+      ]
+    });
+
     const sheet = SS.getSheetByName(SHEET_PERMANEN) || SS.insertSheet(SHEET_PERMANEN);
     const lastRow = sheet.getLastRow();
-    const newRows = batch.map(p => [
-      new Date(), p.nama, p.kelas, p.mapel, p.skorFinal,
-      JSON.stringify(p.jawaban), p.pelanggaran, p.username, p.loginVia
-    ]);
-    sheet.getRange(lastRow + 1, 1, newRows.length, newRows[0].length).setValues(newRows);
-    console.log(`Flushed ${batch.length} pending submissions.`);
+    if (newRows.length > 0) {
+      const numCols = newRows[0].length;
+      sheet.getRange(lastRow + 1, 1, newRows.length, numCols).setValues(newRows);
+    }
+    redisCmd_('LTRIM', queueKey, batchSize, -1);
+    console.log(`Flushed ${newRows.length} submissions.`);
   } catch (e) {
     console.error('Flush gagal:', e);
   } finally {
     lock.releaseLock();
   }
+}
+
+function flushAllNow() {
+  const queueKey = 'pending_submissions_batch';
+  const all = redisCmd_('LRANGE', queueKey, 0, -1);
+  if (!all || all.length === 0) return;
+  const batch = all.map(JSON.parse);
+  const timezone = Session.getScriptTimeZone(); // atau 'Asia/Jakarta' manual
+  const newRows = batch.map(p => [
+    Utilities.formatDate(new Date(p.timestamp), timezone, "M/d/yyyy HH:mm:ss"), // format sesuai contoh
+    p.nama,
+    p.kelas,
+    p.mapel,
+    p.skorFinal,
+    JSON.stringify(p.jawaban),
+    p.pelanggaran,
+    p.username,
+    p.loginVia
+  ]);
+  const sheet = SS.getSheetByName(SHEET_PERMANEN) || SS.insertSheet(SHEET_PERMANEN);
+  const lastRow = sheet.getLastRow();
+  if (newRows.length > 0) {
+    sheet.getRange(lastRow + 1, 1, newRows.length, newRows[0].length).setValues(newRows);
+  }
+  redisCmd_('DEL', queueKey);
+  console.log(`Flushed all ${newRows.length} submissions.`);
 }
 
 // ==================== TEST =====================
@@ -870,6 +935,76 @@ async function testConcurrentSubmitNoDelay() {
   console.log(`📊 Sukses: ${success}, Gagal: ${fail}`);
 }
 
+async function testFlowSiswa() {
+  const TOKEN = 'TEST002';          // Sesuaikan dengan token di sheet Jadwal
+  const KELAS = 'TEST';
+  const USER_BASE = 'testuser';
+  const TOTAL_SISWA = 5;
+
+  console.log('🔍 Memulai test flow 5 siswa...');
+
+  // 1. Ambil sampel soal & kunci (login satu kali)
+  const sampleLogin = cekLogin(TOKEN, `${USER_BASE}1`, KELAS);
+  if (sampleLogin.status !== 'success') {
+    console.error('❌ Sample login gagal:', sampleLogin.pesan);
+    return;
+  }
+  const { kunci, mapel, soal } = sampleLogin;
+  console.log(`📚 Mapel: ${mapel}, Jumlah soal: ${soal.length}`);
+
+  // 2. Proses setiap user
+  const users = Array.from({ length: TOTAL_SISWA }, (_, i) => `${USER_BASE}${i + 1}`);
+  const results = [];
+
+  for (const username of users) {
+    // Buat jawaban dummy (opsi pertama setiap soal)
+    const jawabanDummy = {};
+    for (const q of soal) {
+      if (q.opsi && q.opsi.length) {
+        // Pilih acak antara indeks 0 atau terakhir, atau yang pertama saja
+        const pilihanAcak = Math.floor(Math.random() * q.opsi.length);
+        jawabanDummy[q.id] = q.opsi[pilihanAcak].text;
+      } else {
+        jawabanDummy[q.id] = '';
+      }
+    }
+
+    const payload = {
+      token: TOKEN,
+      nama: `Siswa ${username}`,
+      kelas: KELAS,
+      mapel: mapel,
+      jawaban: jawabanDummy,
+      kunci: kunci,
+      pelanggaran: 0,
+      username: username,
+      loginVia: 'test'
+    };
+
+    try {
+      const skor = simpanKeDatabaseFinal(payload);
+      results.push({ username, skor, status: 'sukses' });
+      console.log(`✔️ ${username} → skor: ${skor}`);
+    } catch (e) {
+      results.push({ username, skor: null, status: `gagal: ${e.message}` });
+      console.error(`❌ ${username} gagal: ${e.message}`);
+    }
+  }
+
+  // 3. Paksa tulis antrean ke sheet
+  console.log('📤 Memproses antrean ke sheet...');
+  flushAllNow();
+
+  // 4. Verifikasi data di sheet
+  const sheet = SS.getSheetByName(SHEET_PERMANEN);
+  const data = sheet.getDataRange().getValues();
+  const totalBaru = data.length - 1; // Baris header diabaikan
+  console.log(`📊 Total baris di sheet Jawaban: ${totalBaru}`);
+  console.log('✅ Test selesai. Periksa sheet Jawaban untuk 5 entri terakhir.');
+
+  return results;
+}
+
 // ==================== DOGET ====================
 function doGet(e) {
   // Ambil parameter 'page'
@@ -890,4 +1025,16 @@ function doGet(e) {
     .setTitle('CBT MTsN 1 CIAMIS')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+}
+
+function doPost(e) {
+  try {
+    const payload = JSON.parse(e.postData.contents);
+    const skor = simpanKeDatabaseFinal(payload);
+    return ContentService.createTextOutput(JSON.stringify({ success: true, skor }))
+      .setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({ success: false, error: err.message }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
 }

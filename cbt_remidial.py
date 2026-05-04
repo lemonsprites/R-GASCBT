@@ -139,137 +139,137 @@ def main():
     story.append(HRFlowable(width="100%", thickness=1, color=colors.grey))
     story.append(Spacer(1, 0.5 * cm))
 
-    # ---- BAGIAN A: SISWA BELUM UJIAN ----
-    story.append(Paragraph("A. SISWA BELUM MENGIKUTI UJIAN", h2_style))
-    if belum_ujian.empty:
-        story.append(Paragraph("✅ Semua siswa telah mengikuti ujian.", normal))
-    else:
-        for _, row in belum_ujian.iterrows():
-            story.append(Paragraph(f"{row['Nama']} — {row['Kelas']}", normal))
-        story.append(Spacer(1, 0.3 * cm))
-    story.append(Spacer(1, 0.3 * cm))
-    story.append(HRFlowable(width="80%", thickness=0.5, color=colors.grey))
+    # # ---- BAGIAN A: SISWA BELUM UJIAN ----
+    # story.append(Paragraph("A. SISWA BELUM MENGIKUTI UJIAN", h2_style))
+    # if belum_ujian.empty:
+    #     story.append(Paragraph("✅ Semua siswa telah mengikuti ujian.", normal))
+    # else:
+    #     for _, row in belum_ujian.iterrows():
+    #         story.append(Paragraph(f"{row['Nama']} — {row['Kelas']}", normal))
+    #     story.append(Spacer(1, 0.3 * cm))
+    # story.append(Spacer(1, 0.3 * cm))
+    # story.append(HRFlowable(width="80%", thickness=0.5, color=colors.grey))
 
-    # ========== BAGIAN B (COVER + DETAIL) – DIPERBAIKI ==========
-    # Hitung statistik untuk cover
-    total_peserta = len(siswa_remedial)
-    mapel_counter = Counter()
-    for nama, kelas, mapel_df in siswa_remedial:
-        for _, row in mapel_df.iterrows():
-            mapel_counter[row['Mapel']] += 1
-    sorted_mapel = sorted(mapel_counter.items(), key=lambda x: x[1], reverse=True)
+    # # ========== BAGIAN B (COVER + DETAIL) – DIPERBAIKI ==========
+    # # Hitung statistik untuk cover
+    # total_peserta = len(siswa_remedial)
+    # mapel_counter = Counter()
+    # for nama, kelas, mapel_df in siswa_remedial:
+    #     for _, row in mapel_df.iterrows():
+    #         mapel_counter[row['Mapel']] += 1
+    # sorted_mapel = sorted(mapel_counter.items(), key=lambda x: x[1], reverse=True)
 
-    # --- COVER REMEDIAL ---
-    story.append(PageBreak())
-    story.append(Spacer(1, 2*cm))
+    # # --- COVER REMEDIAL ---
+    # story.append(PageBreak())
+    # story.append(Spacer(1, 2*cm))
 
-    # Kotak judul utama
-    title_table = Table([[Paragraph("LAPORAN REMEDIAL", h2_style)]], colWidths=[doc.width])
-    title_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#8B0000')),
-        ('TEXTCOLOR', (0, 0), (-1, -1), colors.white),
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('TOPPADDING', (0, 0), (-1, -1), 15),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 15),
-    ]))
-    story.append(title_table)
-    story.append(Spacer(1, 1*cm))
+    # # Kotak judul utama
+    # title_table = Table([[Paragraph("LAPORAN REMEDIAL", h2_style)]], colWidths=[doc.width])
+    # title_table.setStyle(TableStyle([
+    #     ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#8B0000')),
+    #     ('TEXTCOLOR', (0, 0), (-1, -1), colors.white),
+    #     ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+    #     ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+    #     ('TOPPADDING', (0, 0), (-1, -1), 15),
+    #     ('BOTTOMPADDING', (0, 0), (-1, -1), 15),
+    # ]))
+    # story.append(title_table)
+    # story.append(Spacer(1, 1*cm))
 
-    # Subtitle
-    story.append(Paragraph(f"MTSN 1 CIAMIS — TAHUN PELAJARAN 2025/2026", normal))
-    story.append(Spacer(1, 1.5*cm))
+    # # Subtitle
+    # story.append(Paragraph(f"MTSN 1 CIAMIS — TAHUN PELAJARAN 2025/2026", normal))
+    # story.append(Spacer(1, 1.5*cm))
 
-    # Total Peserta (Angka besar)
-    total_box = Table([[Paragraph(f"{total_peserta}", ParagraphStyle('Total', fontSize=48, alignment=TA_CENTER, textColor=colors.white)),
-                        Paragraph("PESERTA REMEDIAL", ParagraphStyle('TotalSub', fontSize=18, alignment=TA_CENTER, textColor=colors.white))]],
-                      colWidths=[doc.width])
-    total_box.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#D35400')),  # Orange
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('TOPPADDING', (0, 0), (-1, -1), 20),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 20),
-    ]))
-    story.append(total_box)
-    story.append(Spacer(1, 1.5*cm))
+    # # Total Peserta (Angka besar)
+    # total_box = Table([[Paragraph(f"{total_peserta}", ParagraphStyle('Total', fontSize=48, alignment=TA_CENTER, textColor=colors.white)),
+    #                     Paragraph("PESERTA REMEDIAL", ParagraphStyle('TotalSub', fontSize=18, alignment=TA_CENTER, textColor=colors.white))]],
+    #                   colWidths=[doc.width])
+    # total_box.setStyle(TableStyle([
+    #     ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#D35400')),  # Orange
+    #     ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+    #     ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+    #     ('TOPPADDING', (0, 0), (-1, -1), 20),
+    #     ('BOTTOMPADDING', (0, 0), (-1, -1), 20),
+    # ]))
+    # story.append(total_box)
+    # story.append(Spacer(1, 1.5*cm))
 
-    # Grouping Mapel
-    story.append(Paragraph("RINCIAN PER MATA PELAJARAN", h2_style))
-    story.append(Spacer(1, 0.3*cm))
-    grouping_data = [['Mata Pelajaran', 'Jumlah Peserta']]
-    for mapel, count in sorted_mapel:
-        grouping_data.append([mapel, str(count)])
-    grouping_table = Table(grouping_data, colWidths=[12*cm, 4*cm])
-    grouping_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#27AE60')),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-        ('ALIGN', (0, 1), (-1, -1), 'LEFT'),
-        ('ALIGN', (1, 0), (1, -1), 'CENTER'),
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#EAFAF1')]),
-    ]))
-    story.append(grouping_table)
-    story.append(Spacer(1, 1*cm))
-    story.append(HRFlowable(width="100%", thickness=1, color=colors.grey))
+    # # Grouping Mapel
+    # story.append(Paragraph("RINCIAN PER MATA PELAJARAN", h2_style))
+    # story.append(Spacer(1, 0.3*cm))
+    # grouping_data = [['Mata Pelajaran', 'Jumlah Peserta']]
+    # for mapel, count in sorted_mapel:
+    #     grouping_data.append([mapel, str(count)])
+    # grouping_table = Table(grouping_data, colWidths=[12*cm, 4*cm])
+    # grouping_table.setStyle(TableStyle([
+    #     ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#27AE60')),
+    #     ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+    #     ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+    #     ('ALIGN', (0, 1), (-1, -1), 'LEFT'),
+    #     ('ALIGN', (1, 0), (1, -1), 'CENTER'),
+    #     ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+    #     ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#EAFAF1')]),
+    # ]))
+    # story.append(grouping_table)
+    # story.append(Spacer(1, 1*cm))
+    # story.append(HRFlowable(width="100%", thickness=1, color=colors.grey))
 
-    # --- DETAIL PESERTA PER MAPEL (DIPERBAIKI) ---
-    story.append(PageBreak())
-    story.append(Paragraph("DAFTAR NAMA PESERTA REMEDIAL", h2_style))
-    story.append(Spacer(1, 0.3*cm))
-    story.append(Paragraph(f"Total: {total_peserta} peserta | KKM: {KKM}", normal))
-    story.append(Spacer(1, 0.5*cm))
+    # # --- DETAIL PESERTA PER MAPEL (DIPERBAIKI) ---
+    # story.append(PageBreak())
+    # story.append(Paragraph("DAFTAR NAMA PESERTA REMEDIAL", h2_style))
+    # story.append(Spacer(1, 0.3*cm))
+    # story.append(Paragraph(f"Total: {total_peserta} peserta | KKM: {KKM}", normal))
+    # story.append(Spacer(1, 0.5*cm))
 
-    if not siswa_remedial:
-        story.append(Paragraph("✅ Tidak ada siswa yang memerlukan remedial.", normal))
-    else:
-        for mapel, _ in sorted_mapel:
-            # Kumpulkan siswa yang remedial di mapel ini
-            siswa_per_mapel = []
-            for nama, kelas, mapel_df in siswa_remedial:
-                nilai_row = mapel_df[mapel_df['Mapel'] == mapel]
-                if not nilai_row.empty:
-                    nilai = nilai_row.iloc[0]['Skor']
-                    siswa_per_mapel.append((nama, kelas, nilai))
+    # if not siswa_remedial:
+    #     story.append(Paragraph("✅ Tidak ada siswa yang memerlukan remedial.", normal))
+    # else:
+    #     for mapel, _ in sorted_mapel:
+    #         # Kumpulkan siswa yang remedial di mapel ini
+    #         siswa_per_mapel = []
+    #         for nama, kelas, mapel_df in siswa_remedial:
+    #             nilai_row = mapel_df[mapel_df['Mapel'] == mapel]
+    #             if not nilai_row.empty:
+    #                 nilai = nilai_row.iloc[0]['Skor']
+    #                 siswa_per_mapel.append((nama, kelas, nilai))
 
-            if not siswa_per_mapel:
-                continue  # seharusnya tidak terjadi
+    #         if not siswa_per_mapel:
+    #             continue  # seharusnya tidak terjadi
 
-            # Buang duplikat (mungkin ada siswa yang muncul >1 karena beberapa mapel)
-            # Namun karena kita sudah loop per mapel, duplikat tidak mungkin di dalam satu mapel yang sama.
-            # Tetap sort berdasarkan Kelas lalu Nama
-            siswa_per_mapel.sort(key=lambda x: (x[1], x[0]))  # Kelas, Nama
+    #         # Buang duplikat (mungkin ada siswa yang muncul >1 karena beberapa mapel)
+    #         # Namun karena kita sudah loop per mapel, duplikat tidak mungkin di dalam satu mapel yang sama.
+    #         # Tetap sort berdasarkan Kelas lalu Nama
+    #         siswa_per_mapel.sort(key=lambda x: (x[1], x[0]))  # Kelas, Nama
 
-            # Sub-judul mapel
-            story.append(Paragraph(f"Mapel: {mapel}", ParagraphStyle('MapelHeader', parent=h2_style, textColor=colors.HexColor('#C0392B'))))
-            story.append(Spacer(1, 0.2*cm))
+    #         # Sub-judul mapel
+    #         story.append(Paragraph(f"Mapel: {mapel}", ParagraphStyle('MapelHeader', parent=h2_style, textColor=colors.HexColor('#C0392B'))))
+    #         story.append(Spacer(1, 0.2*cm))
 
-            # Tabel daftar
-            table_data = [['No', 'Nama Siswa', 'Kelas', 'Nilai']]
-            for i, (nama, kelas, nilai) in enumerate(siswa_per_mapel, 1):
-                table_data.append([str(i), nama, kelas, str(nilai)])
+    #         # Tabel daftar
+    #         table_data = [['No', 'Nama Siswa', 'Kelas', 'Nilai']]
+    #         for i, (nama, kelas, nilai) in enumerate(siswa_per_mapel, 1):
+    #             table_data.append([str(i), nama, kelas, str(nilai)])
 
-            t = Table(table_data, colWidths=[1*cm, 9*cm, 3*cm, 3*cm])
-            t.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#A93226')),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-                ('ALIGN', (0, 0), (0, -1), 'CENTER'),
-                ('ALIGN', (2, 0), (-1, -1), 'CENTER'),
-                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#FDEBD0')]),
-            ]))
-            story.append(t)
-            story.append(Spacer(1, 0.5*cm))
+    #         t = Table(table_data, colWidths=[1*cm, 9*cm, 3*cm, 3*cm])
+    #         t.setStyle(TableStyle([
+    #             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#A93226')),
+    #             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+    #             ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+    #             ('ALIGN', (0, 0), (0, -1), 'CENTER'),
+    #             ('ALIGN', (2, 0), (-1, -1), 'CENTER'),
+    #             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+    #             ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#FDEBD0')]),
+    #         ]))
+    #         story.append(t)
+    #         story.append(Spacer(1, 0.5*cm))
 
-            # Garis pemisah yang lebih jelas antar mapel
-            story.append(HRFlowable(width="100%", thickness=1.5, color=colors.HexColor('#C0392B')))
-            story.append(Spacer(1, 0.5*cm))
+    #         # Garis pemisah yang lebih jelas antar mapel
+    #         story.append(HRFlowable(width="100%", thickness=1.5, color=colors.HexColor('#C0392B')))
+    #         story.append(Spacer(1, 0.5*cm))
 
-    story.append(Spacer(1, 0.5*cm))
-    story.append(HRFlowable(width="100%", thickness=1, color=colors.grey))
-    story.append(Spacer(1, 0.5*cm))
+    # story.append(Spacer(1, 0.5*cm))
+    # story.append(HRFlowable(width="100%", thickness=1, color=colors.grey))
+    # story.append(Spacer(1, 0.5*cm))
 
     # ---- BAGIAN C: DATA ERROR (DISEMPURNAKAN) ----
     story.append(Paragraph("C. DATA ERROR — SKOR MENcurigakan (≤ 10)", h2_style))
